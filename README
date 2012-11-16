@@ -1,0 +1,396 @@
+NAME
+    `Future' - represent an operation awaiting completion
+
+SYNOPSIS
+     my $future = Future->new;
+     $future->on_ready( sub {
+        say "The operation is complete";
+     } );
+
+     kperform_some_operation( sub {
+        $future->done( @_ );
+     } );
+
+DESCRIPTION
+    An `Future' object represents an operation that is currently in
+    progress, or has recently completed. It can be used in a variety of ways
+    to manage the flow of control, and data, through an asynchronous
+    program.
+
+    Some futures represent a single operation (returned by the `new'
+    constructor), and are explicitly marked as ready by calling the `done'
+    method. Others represent a tree of sub-tasks (returned by the `wait_all'
+    or `needs_all' constructors), and are implicitly marked as ready when
+    all of their component futures are ready.
+
+    It is intended that library functions that perform asynchonous
+    operations would use `Future' objects to represent outstanding
+    operations, and allow their calling programs to control or wait for
+    these operations to complete. The implementation and the user of such an
+    interface would typically make use of different methods on the class.
+    The methods below are documented in two sections; those of interest to
+    each side of the interface.
+
+CONSTRUCTORS
+  $future = Future->new
+    Returns a new `Future' instance to represent a leaf future. It will be
+    marked as ready by any of the `done', `fail', or `cancel' methods.
+
+    This constructor would primarily be used by implementations of
+    asynchronous interfaces.
+
+  $future = Future->wait_all( @subfutures )
+    Returns a new `Future' instance that will indicate it is ready once all
+    of the sub future objects given to it indicate that they are ready.
+
+    This constructor would primarily be used by users of asynchronous
+    interfaces.
+
+  $future = Future->needs_all( @subfutures )
+    Returns a new `Future' instance that will indicate it is ready once all
+    of the sub future objects given to it indicate that they have completed
+    successfully, or when any of them indicates that they have failed. If
+    any sub future fails, then this will fail immediately, and the remaining
+    subs not yet ready will be cancelled.
+
+    This constructor would primarily be used by users of asynchronous
+    interfaces.
+
+  $future = $f1->and_then( \&code )
+    Returns a new `Future' instance that allows a sequence of dependent
+    operations to be performed. Once `$f1' indicates a successful
+    completion, the code reference will be invoked and is passed one
+    argument, being `$f1'. It should return a new future, `$f2'. Once `$f2'
+    indicates completion the combined future `$future' will then be marked
+    as complete. The result of calling `get' on the combined future will
+    return whatever was passed to the `done' method of `$f2'.
+
+     $f2 = $code->( $f1 )
+
+    If `$f1' fails then `$future' will indicate this failure immediately and
+    the block of code will not be invoked.
+
+    If `$future' is cancelled before `$f1' completes, then `$f1' will be
+    cancelled. If it is cancelled after completion then `$f2' is cancelled
+    instead.
+
+  $future = $f1->or_else( \&code )
+    Returns a new `Future' instance that allows a sequence of dependent
+    operations to be performed. If `$f1' indicates a successful completion,
+    the combined future will be marked as complete, and yield the same
+    result. If `$f1' indicates a failure, the code reference will be invoked
+    with no arguments. It should return a new future, `$f2'. Once `$f2'
+    indicates completion the combined future will be marked as complete,
+    with either the success or failure of `$f2' as appropriate.
+
+     $f2 = $code->()
+
+    If `$future' is cancelled before `$f1' completes, then `$f1' wil be
+    cancelled. If it is cancelled after completion then `$f2' is cancelled
+    instead.
+
+  $future = $f1->transform( %args )
+    Returns a new `Future' instance that wraps the one given as `$f1'. With
+    no arguments this will be a trivial wrapper; `$future' will complete or
+    fail when `$f1' does, and `$f1' will be cancelled when `$future' is.
+
+    By passing the following named argmuents, the returned `$future' can be
+    made to behave differently to `$f1':
+
+    done => CODE
+            Provides a function to use to modify the result of a successful
+            completion. When `$f1' completes successfully, the result of its
+            `get' method is passed into this function, and whatever it
+            returns is passed to the `done' method of `$future'
+
+    fail => CODE
+            Provides a function to use to modify the result of a failure.
+            When `$f1' fails, the result of its `failure' method is passed
+            into this function, and whatever it returns is passed to the
+            `fail' method of `$future'.
+
+IMPLEMENTATION METHODS
+    These methods would primarily be used by implementations of asynchronous
+    interfaces.
+
+  $future->done( @result )
+    Marks that the leaf future is now ready, and provides a list of values
+    as a result. (The empty list is allowed, and still indicates the future
+    as ready). Cannot be called on a non-leaf future.
+
+    Returns the `$future'.
+
+  $future->( @result )
+    This method is used to overload the calling operator, so simply invoking
+    the future object itself as if it were a `CODE' reference is equivalent
+    to calling the `done' method. This makes it simple to pass as a callback
+    function to other code.
+
+    It turns out however, that this behaviour is too subtle and can lead to
+    bugs when futures are accidentally used as plain `CODE' references. See
+    the `done_cb' method instead. This overload behaviour will be removed in
+    a later version.
+
+  $code = $future->done_cb
+    Returns a `CODE' reference that, when invoked, calls the `done' method.
+    This makes it simple to pass as a callback function to other code.
+
+  $future->fail( $exception, @details )
+    Marks that the leaf future has failed, and provides an exception value.
+    This exception will be thrown by the `get' method if called. If the
+    exception is a non-reference that does not end in a linefeed, its value
+    will be extended by the file and line number of the caller, similar to
+    the logic that `die' uses.
+
+    The exception must evaluate as a true value; false exceptions are not
+    allowed. Further details may be provided that will be returned by the
+    `failure' method in list context. These details will not be part of the
+    exception string raised by `get'.
+
+    Returns the `$future'.
+
+  $code = $future->fail_cb
+    Returns a `CODE' reference that, when invoked, calls the `fail' method.
+    This makes it simple to pass as a callback function to other code.
+
+  $future->on_cancel( $code )
+    If the future is not yet ready, adds a callback to be invoked if the
+    future is cancelled by the `cancel' method. If the future is already
+    ready, throws an exception.
+
+    If the future is cancelled, the callbacks will be invoked in the reverse
+    order to that in which they were registered.
+
+     $on_cancel->( $future )
+
+  $future->on_cancel( $f )
+    If passed another `Future' instance, the passed instance will be
+    cancelled when the original future is cancelled.
+
+  $cancelled = $future->is_cancelled
+    Returns true if the future has been cancelled by `cancel'.
+
+USER METHODS
+    These methods would primarily be used by users of asynchronous
+    interfaces, on objects returned by such an interface.
+
+  $ready = $future->is_ready
+    Returns true on a leaf future if a result has been provided to the
+    `done' method, failed using the `fail' method, or cancelled using the
+    `cancel' method.
+
+    Returns true on a `wait_all' future if all the sub-tasks are ready.
+
+    Returns true on a `needs_all' future if all the sub-tasks have completed
+    successfully or if any of them have failed.
+
+  $future->on_ready( $code )
+    If the future is not yet ready, adds a callback to be invoked when the
+    future is ready. If the future is already ready, invokes it immediately.
+
+    In either case, the callback will be passed the future object itself.
+    The invoked code can then obtain the list of results by calling the
+    `get' method.
+
+     $on_ready->( $future )
+
+    Returns the `$future'.
+
+  $future->on_ready( $f )
+    If passed another `Future' instance, the passed instance will have its
+    `done' or `fail' methods invoked when the original future completes
+    successfully or fails respectively.
+
+  @result = $future->get
+    If the future is ready, returns the list of results that had earlier
+    been given to the `done' method. If not, will raise an exception.
+
+    If called on a `wait_all' or `needs_all' future, it will return a list
+    of the futures it was waiting on, in the order they were passed to the
+    constructor.
+
+  $future->on_done( $code )
+    If the future is not yet ready, adds a callback to be invoked when the
+    future is ready, if it completes successfully. If the future completed
+    successfully, invokes it immediately. If it failed or was cancelled, it
+    is not invoked at all.
+
+    The callback will be passed the result passed to the `done' method.
+
+     $on_done->( @result )
+
+    Returns the `$future'.
+
+  $future->on_done( $f )
+    If passed another `Future' instance, the passed instance will have its
+    `done' method invoked when the original future completes successfully.
+
+  $exception = $future->failure
+  $exception, @details = $future->failure
+    Returns the exception passed to the `fail' method, `undef' if the future
+    completed successfully via the `done' method, or raises an exception if
+    called on a future that is not yet ready.
+
+    If called in list context, will additionally yield a list of the details
+    provided to the `fail' method.
+
+    Because the exception value must be true, this can be used in a simple
+    `if' statement:
+
+     if( my $exception = $future->failure ) {
+        ...
+     }
+     else {
+        my @result = $future->get;
+        ...
+     }
+
+  $future->on_fail( $code )
+    If the future is not yet ready, adds a callback to be invoked when the
+    future is ready, if it fails. If the future has already failed, invokes
+    it immediately. If it completed successfully or was cancelled, it is not
+    invoked at all.
+
+    The callback will be passed the exception and details passed to the
+    `fail' method.
+
+     $on_fail->( $exception, @details )
+
+    Returns the `$future'.
+
+  $future->on_fail( $f )
+    If passed another `Future' instance, the passed instance will have its
+    `fail' method invoked when the original future fails.
+
+    To invoke a `done' method on a future when another one fails, use a CODE
+    reference:
+
+     $future->on_fail( sub { $f->done( @_ ) } );
+
+  $future->cancel
+    Requests that the future be cancelled, immediately marking it as ready.
+    This will invoke all of the code blocks registered by `on_cancel', in
+    the reverse order. When called on a non-leaf future, all its sub-tasks
+    are also cancelled.
+
+  $code = $future->cancel_cb
+    Returns a `CODE' reference that, when invoked, calls the `cancel'
+    method. This makes it simple to pass as a callback function to other
+    code.
+
+EXAMPLES
+    The following examples all demonstrate possible uses of a `Future'
+    object to provide a fictional asynchronous API function called simply
+    `koperation'.
+
+  Providing Results
+    By returning a new `Future' object each time the asynchronous function
+    is called, it provides a placeholder for its eventual result, and a way
+    to indicate when it is complete.
+
+     sub foperation
+     {
+        my %args = @_;
+
+        my $future = Future->new;
+
+        kdo_something(
+           foo => $args{foo},
+           on_done => sub { $future->done( @_ ); },
+        );
+
+        return $future;
+     }
+
+    In most cases, the `done' method will simply be invoked with the entire
+    result list as its arguments. In that case, it is simpler to pass the
+    `$future' object itself as if it was a `CODE' reference; this will
+    invoke the `done' method.
+
+        my $future = Future->new;
+
+        kdo_something(
+           foo => $args{foo},
+           on_done => $future,
+        );
+
+    The caller may then use this future to wait for a result using the
+    `on_ready' method, and obtain the result using `get'.
+
+     my $f = foperation( foo => "something" );
+
+     $f->on_ready( sub {
+        my $f = shift;
+        say "The operation returned: ", $f->get;
+     } );
+
+  Indicating Success or Failure
+    Because the stored exception value of a failued `Future' may not be
+    false, the `failure' method can be used in a conditional statement to
+    detect success or failure.
+
+     my $f = koperation( foo => "something" );
+
+     $f->on_ready( sub {
+        my $f = shift;
+        if( not my $e = $f->failure ) {
+           say "The operation succeeded with: ", $f->get;
+        }
+        else {
+           say "The operation failed with: ", $e;
+        }
+     } );
+
+    By using `not' in the condition, the order of the `if' blocks can be
+    arranged to put the successful case first, similar to a `try'/`catch'
+    block.
+
+    Because the `get' method re-raises the passed exception if the future
+    failed, it can be used to control a `try'/`catch' block directly. (This
+    is sometimes called *Exception Hoisting*).
+
+     use Try::Tiny;
+
+     $f->on_ready( sub {
+        my $f = shift;
+        try {
+           say "The operation succeeded with: ", $f->get;
+        }
+        catch {
+           say "The operation failed with: ", $_;
+        };
+     } );
+
+  Merging Control Flow
+    A `wait_all' future may be used to resynchronise control flow, while
+    waiting for multiple concurrent operations to finish.
+
+     my $f1 = koperation( foo => "something" );
+     my $f2 = koperation( bar => "something else" );
+
+     my $f = Future->wait_all( $f1, $f2 );
+
+     $f->on_ready( sub {
+        say "Operations are ready:";
+        say "  foo: ", $f1->get;
+        say "  bar: ", $f2->get;
+     } );
+
+    This provides an ability somewhat similar to `kpar()' or
+    Async::MergePoint.
+
+TODO
+    Lots of things still need adding. API or semantics is somewhat unclear
+    in places.
+
+    *   `Future->needs_first', which succeeds on the first success of
+        dependent futures and cancels the outstanding ones, only fails if
+        all the dependents do.
+
+    *   Some way to do deferred futures that don't even start their
+        operation until invoked somehow. Ability to chain these together in
+        a sequence, like `CPS::kseq()'.
+
+AUTHOR
+    Paul Evans <leonerd@leonerd.org.uk>
+
