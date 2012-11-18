@@ -2,13 +2,14 @@
 
 use strict;
 
-use Test::More tests => 19;
+use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
 
 use Future;
 
+# All done
 {
    my $f1 = Future->new;
    my $f2 = Future->new;
@@ -43,6 +44,7 @@ use Future;
    is_refcount( $f2, 1, '$f2 has refcount 1 at end of test' );
 }
 
+# One fails
 {
    my $f1 = Future->new;
    my $f2 = Future->new;
@@ -67,8 +69,29 @@ use Future;
    is( exception { $future->get }, "It fails at $file line $line\n", '$future->get throws exception' );
 
    is( $c2, 1, 'Unfinished child future cancelled on failure' );
+
+   is_deeply( [ $future->pending_futures ],
+              [],
+              '$future->pending_futures after $f1 failure' );
+
+   is_deeply( [ $future->ready_futures ],
+              [ $f1, $f2 ],
+              '$future->ready_futures after $f1 failure' );
+
+   is_deeply( [ $future->done_futures ],
+              [],
+              '$future->done_futures after $f1 failure' );
+
+   is_deeply( [ $future->failed_futures ],
+              [ $f1 ],
+              '$future->failed_futures after $f1 failure' );
+
+   is_deeply( [ $future->cancelled_futures ],
+              [ $f2 ],
+              '$future->cancelled_futures after $f1 failure' );
 }
 
+# Cancellation
 {
    my $f1 = Future->new;
    my $c1;
@@ -87,3 +110,5 @@ use Future;
    is( $c1, 1,     '$future->cancel marks subs cancelled' );
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
+
+done_testing;

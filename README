@@ -56,6 +56,19 @@ CONSTRUCTORS
     This constructor would primarily be used by users of asynchronous
     interfaces.
 
+  $future = Future->needs_any( @subfutures )
+    Returns a new `Future' instance that will indicate it is ready once any
+    of the sub future objects given to it indicate that they have completed
+    successfully, or when all of them indicate that they have failed. If any
+    sub future succeeds, then this will succeed immediately, and the
+    remaining subs not yet ready will be cancelled.
+
+    Normally when this Future complete successfully, only one of its
+    sub-futures will be done. If it is constructed with multiple that are
+    already done however, then all of these will be returned from
+    `done_futures'. Users should be careful to still check all the results
+    from `done_futures' in that case.
+
   $future = $f1->and_then( \&code )
     Returns a new `Future' instance that allows a sequence of dependent
     operations to be performed. Once `$f1' indicates a successful
@@ -278,6 +291,19 @@ USER METHODS
     method. This makes it simple to pass as a callback function to other
     code.
 
+METHODS ON NON-LEAF FUTURES
+    The following methods apply to non-leaf futures, to access the
+    sub-futures stored by it.
+
+  @f = $future->pending_futures
+  @f = $future->ready_futures
+  @f = $future->done_futures
+  @f = $future->failed_futures
+  @f = $future->cancelled_futures
+    Return a list of all the pending, ready, done, failed, or cancelled
+    sub-futures. In scalar context, each will yield the number of such
+    sub-futures.
+
 EXAMPLES
     The following examples all demonstrate possible uses of a `Future'
     object to provide a fictional asynchronous API function called simply
@@ -378,18 +404,6 @@ EXAMPLES
 
     This provides an ability somewhat similar to `kpar()' or
     Async::MergePoint.
-
-TODO
-    Lots of things still need adding. API or semantics is somewhat unclear
-    in places.
-
-    *   `Future->needs_first', which succeeds on the first success of
-        dependent futures and cancels the outstanding ones, only fails if
-        all the dependents do.
-
-    *   Some way to do deferred futures that don't even start their
-        operation until invoked somehow. Ability to chain these together in
-        a sequence, like `CPS::kseq()'.
 
 AUTHOR
     Paul Evans <leonerd@leonerd.org.uk>

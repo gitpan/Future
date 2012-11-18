@@ -9,7 +9,9 @@ META.yml
 README
 t/00use.t
 t/01future.t
-t/02wait_all.t
-t/03needs_all.t
-t/04and_then.t
-t/05or_else.t
+t/02and_then.t
+t/03or_else.t
+t/10wait_all.t
+t/11needs_all.t
+t/12needs_any.t
+t/99pod.t

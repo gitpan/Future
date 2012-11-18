@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use Carp;
 use Scalar::Util qw( weaken );
@@ -72,24 +72,6 @@ sub new
    }, $class;
 }
 
-sub _new_with_subs
-{
-   my $self = shift->new;
-   my ( $subs ) = @_;
-
-   eval { $_->isa( __PACKAGE__ ) } or croak "Expected a ".__PACKAGE__.", got $_" for @$subs;
-
-   $self->{result} = $subs;
-
-   $self->on_cancel( sub {
-      foreach my $sub ( @$subs ) {
-         $sub->cancel if !$sub->is_ready;
-      }
-   } );
-
-   return $self;
-}
-
 =head2 $future = Future->wait_all( @subfutures )
 
 Returns a new C<Future> instance that will indicate it is ready once all of the
@@ -104,7 +86,7 @@ sub wait_all
    my $class = shift;
    my @subs = @_;
 
-   my $self = $class->_new_with_subs( \@subs );
+   my $self = Future::Dependent->new( \@subs );
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
@@ -138,7 +120,7 @@ sub needs_all
    my $class = shift;
    my @subs = @_;
 
-   my $self = $class->_new_with_subs( \@subs );
+   my $self = Future::Dependent->new( \@subs );
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
@@ -154,6 +136,54 @@ sub needs_all
       else {
          foreach my $sub ( @subs ) {
             $sub->is_ready or return;
+         }
+         $weakself->_mark_ready;
+      }
+   };
+
+   foreach my $sub ( @subs ) {
+      $sub->on_ready( $sub_on_ready );
+   }
+
+   return $self;
+}
+
+=head2 $future = Future->needs_any( @subfutures )
+
+Returns a new C<Future> instance that will indicate it is ready once any of
+the sub future objects given to it indicate that they have completed
+successfully, or when all of them indicate that they have failed. If any sub
+future succeeds, then this will succeed immediately, and the remaining subs
+not yet ready will be cancelled.
+
+Normally when this Future complete successfully, only one of its sub-futures
+will be done. If it is constructed with multiple that are already done
+however, then all of these will be returned from C<done_futures>. Users should
+be careful to still check all the results from C<done_futures> in that case.
+
+=cut
+
+sub needs_any
+{
+   my $class = shift;
+   my @subs = @_;
+
+   my $self = Future::Dependent->new( \@subs );
+
+   weaken( my $weakself = $self );
+   my $sub_on_ready = sub {
+      return unless $weakself;
+
+      if( my @failure = $_[0]->failure ) {
+         foreach my $sub ( @subs ) {
+            $sub->is_ready or return;
+         }
+         $weakself->{failure} = \@failure;
+         $weakself->_mark_ready;
+      }
+      else {
+         foreach my $sub ( @subs ) {
+            $sub->cancel if !$sub->is_ready;
          }
          $weakself->_mark_ready;
       }
@@ -743,6 +773,83 @@ sub cancel_cb
    return sub { $self->cancel };
 }
 
+package Future::Dependent;
+# 'internal' subclass for non-leaf futures
+our @ISA = qw( Future );
+
+use Carp;
+
+sub new
+{
+   my $self = shift->SUPER::new;
+   my ( $subs ) = @_;
+
+   eval { $_->isa( "Future" ) } or croak "Expected a Future, got $_" for @$subs;
+
+   $self->{result} = $subs;
+
+   $self->on_cancel( sub {
+      foreach my $sub ( @$subs ) {
+         $sub->cancel if !$sub->is_ready;
+      }
+   } );
+
+   return $self;
+}
+
+=head1 METHODS ON NON-LEAF FUTURES
+
+The following methods apply to non-leaf futures, to access the sub-futures
+stored by it.
+
+=cut
+
+=head2 @f = $future->pending_futures
+
+=head2 @f = $future->ready_futures
+
+=head2 @f = $future->done_futures
+
+=head2 @f = $future->failed_futures
+
+=head2 @f = $future->cancelled_futures
+
+Return a list of all the pending, ready, done, failed, or cancelled
+sub-futures. In scalar context, each will yield the number of such
+sub-futures.
+
+=cut
+
+sub pending_futures
+{
+   my $self = shift;
+   return grep { not $_->is_ready } @{ $self->{result} };
+}
+
+sub ready_futures
+{
+   my $self = shift;
+   return grep { $_->is_ready } @{ $self->{result} };
+}
+
+sub done_futures
+{
+   my $self = shift;
+   return grep { $_->is_ready and not $_->failure and not $_->is_cancelled } @{ $self->{result} };
+}
+
+sub failed_futures
+{
+   my $self = shift;
+   return grep { $_->is_ready and $_->failure } @{ $self->{result} };
+}
+
+sub cancelled_futures
+{
+   my $self = shift;
+   return grep { $_->is_ready and $_->is_cancelled } @{ $self->{result} };
+}
+
 =head1 EXAMPLES
 
 The following examples all demonstrate possible uses of a C<Future>
@@ -848,27 +955,6 @@ This provides an ability somewhat similar to C<kpar()> or
 L<Async::MergePoint>.
 
 =cut
-
-=head1 TODO
-
-Lots of things still need adding. API or semantics is somewhat unclear in
-places.
-
-=over 4
-
-=item *
-
-C<< Future->needs_first >>, which succeeds on the first success of
-dependent futures and cancels the outstanding ones, only fails if all the
-dependents do.
-
-=item *
-
-Some way to do deferred futures that don't even start their operation until
-invoked somehow. Ability to chain these together in a sequence, like
-C<CPS::kseq()>.
-
-=back
 
 =head1 AUTHOR
 

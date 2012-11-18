@@ -2,7 +2,7 @@
 
 use strict;
 
-use Test::More tests => 20;
+use Test::More;
 use Test::Identity;
 use Test::Refcount;
 
@@ -19,6 +19,14 @@ use Future;
    is_refcount( $f1, 2, '$f1 has refcount 2 after adding to ->wait_all' );
    is_refcount( $f2, 2, '$f2 has refcount 2 after adding to ->wait_all' );
 
+   is_deeply( [ $future->pending_futures ],
+              [ $f1, $f2 ],
+              '$future->pending_futures before any ready' );
+
+   is_deeply( [ $future->ready_futures ],
+              [],
+              '$future->done_futures before any ready' );
+
    my @on_ready_args;
    $future->on_ready( sub { @on_ready_args = @_ } );
 
@@ -26,6 +34,18 @@ use Future;
    is( scalar @on_ready_args, 0, 'on_ready not yet invoked' );
 
    $f1->done( one => 1 );
+
+   is_deeply( [ $future->pending_futures ],
+              [ $f2 ],
+              '$future->pending_futures after $f1 ready' );
+
+   is_deeply( [ $future->ready_futures ],
+              [ $f1 ],
+              '$future->ready_futures after $f1 ready' );
+
+   is_deeply( [ $future->done_futures ],
+              [ $f1 ],
+              '$future->done_futures after $f1 ready' );
 
    ok( !$future->is_ready, '$future still not yet ready after f1 ready' );
    is( scalar @on_ready_args, 0, 'on_ready not yet invoked' );
@@ -41,6 +61,18 @@ use Future;
    identical( $results[0], $f1, 'Results[0] from $future->get is f1' );
    identical( $results[1], $f2, 'Results[1] from $future->get is f2' );
    undef @results;
+
+   is_deeply( [ $future->pending_futures ],
+              [],
+              '$future->pending_futures after $f2 ready' );
+
+   is_deeply( [ $future->ready_futures ],
+              [ $f1, $f2 ],
+              '$future->ready_futures after $f2 ready' );
+
+   is_deeply( [ $future->done_futures ],
+              [ $f1, $f2 ],
+              '$future->done_futures after $f2 ready' );
 
    is_refcount( $future, 1, '$future has refcount 1 at end of test' );
    undef $future;
@@ -83,3 +115,5 @@ use Future;
    is( $c1, 1,     '$future->cancel marks subs cancelled' );
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
+
+done_testing;

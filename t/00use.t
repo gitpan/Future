@@ -2,6 +2,8 @@
 
 use strict;
 
-use Test::More tests => 1;
+use Test::More;
 
 use_ok( "Future" );
+
+done_testing;

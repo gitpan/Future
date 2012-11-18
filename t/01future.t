@@ -2,7 +2,7 @@
 
 use strict;
 
-use Test::More tests => 44;
+use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
@@ -261,3 +261,5 @@ use Future;
    $future->cancel;
    is( $cancelled, 1, '->transform cancel' );
 }
+
+done_testing;

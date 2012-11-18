@@ -2,7 +2,7 @@
 
 use strict;
 
-use Test::More tests => 15;
+use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
@@ -100,3 +100,5 @@ use Future;
 
    ok( $f2->is_cancelled, '$f2 cancelled by $fseq cancel' );
 }
+
+done_testing;

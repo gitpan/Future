@@ -1,4 +1,9 @@
 Revision history for Future
 
+0.02    CHANGES:
+         * Rearranged non-leaf future logic
+         * Added {pending,ready,done,failed,cancelled}_futures accessors
+         * Added Future->needs_any constructor
+
 0.01    First version, released on an unsuspecting world.
 
