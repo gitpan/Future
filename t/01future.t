@@ -53,18 +53,6 @@ use Future;
    is_deeply( \@on_done_args, [ result => "via cb" ], 'Results via ->done_cb' );
 }
 
-# Callable
-{
-   my $future = Future->new;
-
-   my @on_done_args;
-   $future->on_done( sub { @on_done_args = @_ } );
-
-   $future->( another => "result" );
-
-   is_deeply( \@on_done_args, [ another => "result" ], '$future is directly callable' );
-}
-
 {
    my $future = Future->new;
 
@@ -228,38 +216,6 @@ use Future;
 
    $f1->cancel;
    is( $cancelled, 1, 'Chained cancellation' );
-}
-
-# Transformations
-{
-   my $f1 = Future->new;
-
-   my $future = $f1->transform(
-      done => sub { result => @_ },
-   );
-
-   $f1->done( 1, 2, 3 );
-
-   is_deeply( [ $future->get ], [ result => 1, 2, 3 ], '->transform result' );
-
-   $f1 = Future->new;
-
-   $future = $f1->transform(
-      fail => sub { "failure\n" => @_ },
-   );
-
-   $f1->fail( "something failed\n" );
-
-   is_deeply( [ $future->failure ], [ "failure\n" => "something failed\n" ], '->transform failure' );
-
-   $f1 = Future->new;
-   my $cancelled;
-   $f1->on_cancel( sub { $cancelled++ } );
-
-   $future = $f1->transform;
-
-   $future->cancel;
-   is( $cancelled, 1, '->transform cancel' );
 }
 
 done_testing;

@@ -1,5 +1,16 @@
 Revision history for Future
 
+0.03    INCOMPATIBLE CHANGES:
+         * Future->needs_all and Future->needs_any now return dependents'
+           results
+
+        CHANGES:
+         * Removed $future->( ... ) callable override
+         * Pass $f1 to ->or_else code block by symmetry with ->and_then
+         * Added $f->followed_by
+         * Added Future->wait_any dependent future constructor
+         * Rearranged documentation and added more examples
+
 0.02    CHANGES:
          * Rearranged non-leaf future logic
          * Added {pending,ready,done,failed,cancelled}_futures accessors

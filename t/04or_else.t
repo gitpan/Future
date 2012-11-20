@@ -37,6 +37,7 @@ use Future;
 
    my $f2;
    my $fseq = $f1->or_else( sub { 
+      identical( $_[0], $f1, 'or_else block passed $f1' );
       return $f2 = Future->new;
    } );
 

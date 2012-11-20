@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Carp;
 use Scalar::Util qw( weaken );
@@ -34,11 +34,14 @@ An C<Future> object represents an operation that is currently in progress, or
 has recently completed. It can be used in a variety of ways to manage the flow
 of control, and data, through an asynchronous program.
 
-Some futures represent a single operation (returned by the C<new>
-constructor), and are explicitly marked as ready by calling the C<done>
-method. Others represent a tree of sub-tasks (returned by the C<wait_all>
-or C<needs_all> constructors), and are implicitly marked as ready when all
-of their component futures are ready.
+Some futures represent a single operation and are explicitly marked as ready
+by calling the C<done> or C<fail> methods. These are called "leaf" futures
+here, and are returned by the C<new> constructor.
+
+Other futures represent a collection sub-tasks, and are implicitly marked as
+ready depending on the readiness of their component futures as required. These
+are called "dependent" futures here, and are returned by the various C<wait_*>
+and C<need_*> constructors.
 
 It is intended that library functions that perform asynchonous operations
 would use C<Future> objects to represent outstanding operations, and allow
@@ -72,144 +75,15 @@ sub new
    }, $class;
 }
 
-=head2 $future = Future->wait_all( @subfutures )
+=head2 $future = $f1->followed_by( \&code )
 
-Returns a new C<Future> instance that will indicate it is ready once all of the
-sub future objects given to it indicate that they are ready.
-
-This constructor would primarily be used by users of asynchronous interfaces.
-
-=cut
-
-sub wait_all
-{
-   my $class = shift;
-   my @subs = @_;
-
-   my $self = Future::Dependent->new( \@subs );
-
-   weaken( my $weakself = $self );
-   my $sub_on_ready = sub {
-      foreach my $sub ( @subs ) {
-         $sub->is_ready or return;
-      }
-      $weakself and $weakself->_mark_ready;
-   };
-
-   foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
-   }
-
-   return $self;
-}
-
-=head2 $future = Future->needs_all( @subfutures )
-
-Returns a new C<Future> instance that will indicate it is ready once all of the
-sub future objects given to it indicate that they have completed successfully,
-or when any of them indicates that they have failed. If any sub future fails,
-then this will fail immediately, and the remaining subs not yet ready will be
-cancelled.
-
-This constructor would primarily be used by users of asynchronous interfaces.
-
-=cut
-
-sub needs_all
-{
-   my $class = shift;
-   my @subs = @_;
-
-   my $self = Future::Dependent->new( \@subs );
-
-   weaken( my $weakself = $self );
-   my $sub_on_ready = sub {
-      return unless $weakself;
-
-      if( my @failure = $_[0]->failure ) {
-         $weakself->{failure} = \@failure;
-         foreach my $sub ( @subs ) {
-            $sub->cancel if !$sub->is_ready;
-         }
-         $weakself->_mark_ready;
-      }
-      else {
-         foreach my $sub ( @subs ) {
-            $sub->is_ready or return;
-         }
-         $weakself->_mark_ready;
-      }
-   };
-
-   foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
-   }
-
-   return $self;
-}
-
-=head2 $future = Future->needs_any( @subfutures )
-
-Returns a new C<Future> instance that will indicate it is ready once any of
-the sub future objects given to it indicate that they have completed
-successfully, or when all of them indicate that they have failed. If any sub
-future succeeds, then this will succeed immediately, and the remaining subs
-not yet ready will be cancelled.
-
-Normally when this Future complete successfully, only one of its sub-futures
-will be done. If it is constructed with multiple that are already done
-however, then all of these will be returned from C<done_futures>. Users should
-be careful to still check all the results from C<done_futures> in that case.
-
-=cut
-
-sub needs_any
-{
-   my $class = shift;
-   my @subs = @_;
-
-   my $self = Future::Dependent->new( \@subs );
-
-   weaken( my $weakself = $self );
-   my $sub_on_ready = sub {
-      return unless $weakself;
-
-      if( my @failure = $_[0]->failure ) {
-         foreach my $sub ( @subs ) {
-            $sub->is_ready or return;
-         }
-         $weakself->{failure} = \@failure;
-         $weakself->_mark_ready;
-      }
-      else {
-         foreach my $sub ( @subs ) {
-            $sub->cancel if !$sub->is_ready;
-         }
-         $weakself->_mark_ready;
-      }
-   };
-
-   foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
-   }
-
-   return $self;
-}
-
-=head2 $future = $f1->and_then( \&code )
-
-Returns a new C<Future> instance that allows a sequence of dependent operations
-to be performed. Once C<$f1> indicates a successful completion, the code
-reference will be invoked and is passed one argument, being C<$f1>. It should
-return a new future, C<$f2>. Once C<$f2> indicates completion the combined
-future C<$future> will then be marked as complete. The result of calling C<get>
-on the combined future will return whatever was passed to the C<done> method of
-C<$f2>.
+Returns a new C<Future> instance that allows a sequence of operations to be
+performed. Once C<$f1> is ready, the code reference will be invoked and is
+passed one argument, being C<$f1>. It should return a future, C<$f2>. Once
+C<$f2> indicates completion the combined future C<$future> will then be marked
+as complete, with whatever result C<$f2> gave.
 
  $f2 = $code->( $f1 )
-
-If C<$f1> fails then C<$future> will indicate this failure immediately and the
-block of code will not be invoked.
 
 If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
 cancelled. If it is cancelled after completion then C<$f2> is cancelled
@@ -217,7 +91,7 @@ instead.
 
 =cut
 
-sub and_then
+sub followed_by
 {
    my $f1 = shift;
    my ( $code ) = @_;
@@ -229,14 +103,7 @@ sub and_then
    $f1->on_ready( sub {
       my $self = shift;
 
-      if( $self->is_cancelled ) {
-         return;
-      }
-
-      if( $self->failure ) {
-         $fseq->fail( $self->failure );
-         return;
-      }
+      return if $self->is_cancelled;
 
       $f2 = $code->( $self );
 
@@ -261,66 +128,46 @@ sub and_then
    return $fseq;
 }
 
+=head2 $future = $f1->and_then( \&code )
+
+A convenient shortcut to C<followed_by>, which invokes the supplied code
+reference only if the first future completes successfully. If it fails, then
+the returned future will fail with the same error and the code reference will
+not be invoked.
+
+=cut
+
+sub and_then
+{
+   my $self = shift;
+   my ( $code ) = @_;
+
+   return $self->followed_by( sub {
+      my $self = shift;
+      return $self if $self->failure;
+      return $code->( $self );
+   });
+}
+
 =head2 $future = $f1->or_else( \&code )
 
-Returns a new C<Future> instance that allows a sequence of dependent
-operations to be performed. If C<$f1> indicates a successful completion, the
-combined future will be marked as complete, and yield the same result. If
-C<$f1> indicates a failure, the code reference will be invoked with no
-arguments. It should return a new future, C<$f2>. Once C<$f2> indicates
-completion the combined future will be marked as complete, with either the
-success or failure of C<$f2> as appropriate.
-
- $f2 = $code->()
-
-If C<$future> is cancelled before C<$f1> completes, then C<$f1> wil be
-cancelled. If it is cancelled after completion then C<$f2> is cancelled
-instead.
+A convenient shortcut to C<followed_by>, which invokes the supplied code
+reference only if the first future fails. If it completes successfully, then
+the returned future will complete with the same result and the code reference
+will not be invoked.
 
 =cut
 
 sub or_else
 {
-   my $f1 = shift;
+   my $self = shift;
    my ( $code ) = @_;
 
-   my $fseq = Future->new;
-
-   my $f2;
-
-   $f1->on_ready( sub {
+   return $self->followed_by( sub {
       my $self = shift;
-
-      if( $self->is_cancelled ) {
-         return;
-      }
-
-      if( !$self->failure ) {
-         $fseq->done( $self->get );
-         return;
-      }
-
-      $f2 = $code->();
-
-      $f2->on_ready( sub {
-         my $f2 = shift;
-         if( $f2->is_cancelled ) {
-            return;
-         }
-         elsif( $f2->failure ) {
-            $fseq->fail( $f2->failure );
-         }
-         else {
-            $fseq->done( $f2->get );
-         }
-      } );
-   } );
-
-   $fseq->on_cancel( sub {
-      ( $f2 || $f1 )->cancel
-   } );
-
-   return $fseq;
+      return $self if not $self->failure;
+      return $code->( $self );
+   });
 }
 
 =head2 $future = $f1->transform( %args )
@@ -359,24 +206,15 @@ sub transform
    my $xfrm_done = $args{done};
    my $xfrm_fail = $args{fail};
 
-   my $ret = Future->new;
-
-   $self->on_ready(
-      sub {
-         my $self = shift;
-         if( $self->is_cancelled ) { }
-         elsif( $self->failure ) {
-            $ret->fail( $xfrm_fail ? $xfrm_fail->( $self->failure ) : $self->failure )
-         }
-         else {
-            $ret->done( $xfrm_done ? $xfrm_done->( $self->get ) : $self->get );
-         }
+   return $self->followed_by( sub {
+      my $self = shift;
+      if( !$self->failure ) {
+         return Future->new->done( $xfrm_done ? $xfrm_done->( $self->get ) : $self->get );
       }
-   );
-
-   $ret->on_cancel( $self );
-
-   return $ret;
+      else {
+         return Future->new->fail( $xfrm_fail ? $xfrm_fail->( $self->failure ) : $self->failure );
+      }
+   });
 }
 
 sub _mark_ready
@@ -420,21 +258,9 @@ interfaces.
 
 Marks that the leaf future is now ready, and provides a list of values as a
 result. (The empty list is allowed, and still indicates the future as ready).
-Cannot be called on a non-leaf future.
+Cannot be called on a dependent future.
 
 Returns the C<$future>.
-
-=head2 $future->( @result )
-
-This method is used to overload the calling operator, so simply invoking the
-future object itself as if it were a C<CODE> reference is equivalent to
-calling the C<done> method. This makes it simple to pass as a callback
-function to other code.
-
-It turns out however, that this behaviour is too subtle and can lead to bugs
-when futures are accidentally used as plain C<CODE> references. See the
-C<done_cb> method instead. This overload behaviour will be removed in a later
-version.
 
 =cut
 
@@ -443,7 +269,7 @@ sub done
    my $self = shift;
 
    $self->is_ready and croak "$self is already complete and cannot be ->done twice";
-   $self->{result} and croak "$self is not a leaf Future, cannot be ->done";
+   $self->{subs} and croak "$self is not a leaf Future, cannot be ->done";
    $self->{result} = [ @_ ];
    $self->_mark_ready;
 
@@ -456,9 +282,6 @@ Returns a C<CODE> reference that, when invoked, calls the C<done> method. This
 makes it simple to pass as a callback function to other code.
 
 =cut
-
-use overload '&{}' => 'done_cb',
-             fallback => 1;
 
 sub done_cb
 {
@@ -488,7 +311,7 @@ sub fail
    my ( $exception, @details ) = @_;
 
    $self->is_ready and croak "$self is already complete and cannot be ->fail'ed";
-   $self->{result} and croak "$self is not a leaf Future, cannot be ->fail'ed";
+   $self->{subs} and croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or croak "$self ->fail requires an exception that is true";
    if( !ref $exception and $exception !~ m/\n$/ ) {
       $exception .= sprintf " at %s line %d\n", (caller)[1,2];
@@ -562,10 +385,8 @@ Returns true on a leaf future if a result has been provided to the C<done>
 method, failed using the C<fail> method, or cancelled using the C<cancel>
 method.
 
-Returns true on a C<wait_all> future if all the sub-tasks are ready.
-
-Returns true on a C<needs_all> future if all the sub-tasks have completed
-successfully or if any of them have failed.
+Returns true on a dependent future if it is ready to yield a result, depending
+on its component futures.
 
 =cut
 
@@ -612,12 +433,14 @@ sub on_ready
 
 =head2 @result = $future->get
 
-If the future is ready, returns the list of results that had earlier been
-given to the C<done> method. If not, will raise an exception.
+If the future is ready and completed successfully, returns the list of 
+results that had earlier been given to the C<done> method on a leaf future,
+or the list of component futures it was waiting for on a dependent future.
 
-If called on a C<wait_all> or C<needs_all> future, it will return a list of
-the futures it was waiting on, in the order they were passed to the
-constructor.
+If the future is ready but failed, this method raises as an exception the
+failure string or object that was given to the C<fail> method.
+
+If it is not yet ready, or was cancelled, an exception is thrown.
 
 =cut
 
@@ -743,7 +566,8 @@ sub on_fail
 
 Requests that the future be cancelled, immediately marking it as ready. This
 will invoke all of the code blocks registered by C<on_cancel>, in the reverse
-order. When called on a non-leaf future, all its sub-tasks are also cancelled.
+order. When called on a dependent future, all its component futures are also
+cancelled.
 
 =cut
 
@@ -773,20 +597,22 @@ sub cancel_cb
    return sub { $self->cancel };
 }
 
-package Future::Dependent;
-# 'internal' subclass for non-leaf futures
-our @ISA = qw( Future );
+=head1 DEPENDENT FUTURES
 
-use Carp;
+The following constructors all take a list of component futures, and return a
+new future whose readiness somehow depends on the readiness of those
+components.
 
-sub new
+=cut
+
+sub _new_dependent
 {
-   my $self = shift->SUPER::new;
+   my $self = shift->new;
    my ( $subs ) = @_;
 
    eval { $_->isa( "Future" ) } or croak "Expected a Future, got $_" for @$subs;
 
-   $self->{result} = $subs;
+   $self->{subs} = $subs;
 
    $self->on_cancel( sub {
       foreach my $sub ( @$subs ) {
@@ -797,10 +623,203 @@ sub new
    return $self;
 }
 
-=head1 METHODS ON NON-LEAF FUTURES
+=head2 $future = Future->wait_all( @subfutures )
 
-The following methods apply to non-leaf futures, to access the sub-futures
-stored by it.
+Returns a new C<Future> instance that will indicate it is ready once all of
+the sub future objects given to it indicate that they are ready. Its result
+will a list of its component futures.
+
+This constructor would primarily be used by users of asynchronous interfaces.
+
+=cut
+
+sub wait_all
+{
+   my $class = shift;
+   my @subs = @_;
+
+   my $self = Future->_new_dependent( \@subs );
+
+   weaken( my $weakself = $self );
+   my $sub_on_ready = sub {
+      return if $_[0]->is_cancelled;
+      return unless $weakself;
+
+      foreach my $sub ( @subs ) {
+         $sub->is_ready or return;
+      }
+
+      $weakself->{result} = [ @subs ];
+      $weakself->_mark_ready;
+   };
+
+   foreach my $sub ( @subs ) {
+      $sub->on_ready( $sub_on_ready );
+   }
+
+   return $self;
+}
+
+=head2 $future = Future->wait_any( @subfutures )
+
+Returns a new C<Future> instance that will indicate it is ready once any of
+the sub future objects given to it indicate that they are ready. Any remaining
+component futures that are not yet ready will be cancelled. Its result will be
+the result of the first component future that was ready; either success or
+failure.
+
+This constructor would primarily be used by users of asynchronous interfaces.
+
+=cut
+
+sub wait_any
+{
+   my $class = shift;
+   my @subs = @_;
+
+   my $self = Future->_new_dependent( \@subs );
+
+   weaken( my $weakself = $self );
+   my $sub_on_ready = sub {
+      return if $_[0]->is_cancelled;
+      return unless $weakself;
+
+      foreach my $sub ( @subs ) {
+         $sub->is_ready or $sub->cancel;
+      }
+
+      if( $_[0]->failure ) {
+         $weakself->{failure} = [ $_[0]->failure ];
+      }
+      else {
+         $weakself->{result}  = [ $_[0]->get ];
+      }
+      $weakself->_mark_ready;
+   };
+
+   foreach my $sub ( @subs ) {
+      $sub->on_ready( $sub_on_ready );
+   }
+
+   return $self;
+}
+
+=head2 $future = Future->needs_all( @subfutures )
+
+Returns a new C<Future> instance that will indicate it is ready once all of the
+sub future objects given to it indicate that they have completed successfully,
+or when any of them indicates that they have failed. If any sub future fails,
+then this will fail immediately, and the remaining subs not yet ready will be
+cancelled.
+
+If successful, its result will be a concatenated list of the results of all
+its component futures, in corresponding order. If it fails, its failure will
+be that of the first component future that failed. To access each component
+future's results individually, use C<done_futures>.
+
+(B<NOTE> that this result is different from earlier versions of C<Future>.)
+
+This constructor would primarily be used by users of asynchronous interfaces.
+
+=cut
+
+sub needs_all
+{
+   my $class = shift;
+   my @subs = @_;
+
+   my $self = Future->_new_dependent( \@subs );
+
+   weaken( my $weakself = $self );
+   my $sub_on_ready = sub {
+      return if $_[0]->is_cancelled;
+      return unless $weakself;
+
+      if( my @failure = $_[0]->failure ) {
+         foreach my $sub ( @subs ) {
+            $sub->cancel if !$sub->is_ready;
+         }
+         $weakself->{failure} = \@failure;
+         $weakself->_mark_ready;
+      }
+      else {
+         foreach my $sub ( @subs ) {
+            $sub->is_ready or return;
+         }
+         $weakself->{result} = [ map { $_->get } @subs ];
+         $weakself->_mark_ready;
+      }
+   };
+
+   foreach my $sub ( @subs ) {
+      $sub->on_ready( $sub_on_ready );
+   }
+
+   return $self;
+}
+
+=head2 $future = Future->needs_any( @subfutures )
+
+Returns a new C<Future> instance that will indicate it is ready once any of
+the sub future objects given to it indicate that they have completed
+successfully, or when all of them indicate that they have failed. If any sub
+future succeeds, then this will succeed immediately, and the remaining subs
+not yet ready will be cancelled.
+
+If successful, its result will be that of the first component future that
+succeeded. If it fails, its failure will be that of the last component future
+to fail. To access the other failures, use C<failed_futures>.
+
+(B<NOTE> that this result is different from earlier versions of C<Future>.)
+
+Normally when this Future completes successfully, only one of its component
+futures will be done. If it is constructed with multiple that are already done
+however, then all of these will be returned from C<done_futures>. Users should
+be careful to still check all the results from C<done_futures> in that case.
+
+This constructor would primarily be used by users of asynchronous interfaces.
+
+=cut
+
+sub needs_any
+{
+   my $class = shift;
+   my @subs = @_;
+
+   my $self = Future->_new_dependent( \@subs );
+
+   weaken( my $weakself = $self );
+   my $sub_on_ready = sub {
+      return if $_[0]->is_cancelled;
+      return unless $weakself;
+
+      if( my @failure = $_[0]->failure ) {
+         foreach my $sub ( @subs ) {
+            $sub->is_ready or return;
+         }
+         $weakself->{failure} = \@failure;
+         $weakself->_mark_ready;
+      }
+      else {
+         foreach my $sub ( @subs ) {
+            $sub->cancel if !$sub->is_ready;
+         }
+         $weakself->{result} = [ $_[0]->get ];
+         $weakself->_mark_ready;
+      }
+   };
+
+   foreach my $sub ( @subs ) {
+      $sub->on_ready( $sub_on_ready );
+   }
+
+   return $self;
+}
+
+=head1 METHODS ON DEPENDENT FUTURES
+
+The following methods apply to dependent (i.e. non-leaf) futures, to access
+the component futures stored by it.
 
 =cut
 
@@ -815,39 +834,44 @@ stored by it.
 =head2 @f = $future->cancelled_futures
 
 Return a list of all the pending, ready, done, failed, or cancelled
-sub-futures. In scalar context, each will yield the number of such
-sub-futures.
+component futures. In scalar context, each will yield the number of such
+component futures.
 
 =cut
 
 sub pending_futures
 {
    my $self = shift;
-   return grep { not $_->is_ready } @{ $self->{result} };
+   $self->{subs} or croak "Cannot call ->pending_futures on a non-dependent Future";
+   return grep { not $_->is_ready } @{ $self->{subs} };
 }
 
 sub ready_futures
 {
    my $self = shift;
-   return grep { $_->is_ready } @{ $self->{result} };
+   $self->{subs} or croak "Cannot call ->ready_futures on a non-dependent Future";
+   return grep { $_->is_ready } @{ $self->{subs} };
 }
 
 sub done_futures
 {
    my $self = shift;
-   return grep { $_->is_ready and not $_->failure and not $_->is_cancelled } @{ $self->{result} };
+   $self->{subs} or croak "Cannot call ->done_futures on a non-dependent Future";
+   return grep { $_->is_ready and not $_->failure and not $_->is_cancelled } @{ $self->{subs} };
 }
 
 sub failed_futures
 {
    my $self = shift;
-   return grep { $_->is_ready and $_->failure } @{ $self->{result} };
+   $self->{subs} or croak "Cannot call ->failed_futures on a non-dependent Future";
+   return grep { $_->is_ready and $_->failure } @{ $self->{subs} };
 }
 
 sub cancelled_futures
 {
    my $self = shift;
-   return grep { $_->is_ready and $_->is_cancelled } @{ $self->{result} };
+   $self->{subs} or croak "Cannot call ->cancelled_futures on a non-dependent Future";
+   return grep { $_->is_ready and $_->is_cancelled } @{ $self->{subs} };
 }
 
 =head1 EXAMPLES
@@ -900,9 +924,9 @@ method, and obtain the result using C<get>.
 
 =head2 Indicating Success or Failure
 
-Because the stored exception value of a failued C<Future> may not be false,
-the C<failure> method can be used in a conditional statement to detect success
-or failure.
+Because the stored exception value of a failed future may not be false, the
+C<failure> method can be used in a conditional statement to detect success or
+failure.
 
  my $f = koperation( foo => "something" );
 
@@ -935,6 +959,89 @@ called I<Exception Hoisting>).
     };
  } );
 
+=head2 Immediate Futures
+
+Because the C<done> method returns the future object itself, it can be used to
+generate a C<Future> that is immediately ready with a result.
+
+ my $f = Future->new->done( $value );
+
+Similarly, the C<fail> method can be used to generate a C<Future> that is
+immediately failed.
+
+ my $f = Future->new->fail( "This is never going to work" );
+
+This could be considered similarly to a C<die> call.
+
+=head2 Sequencing
+
+The C<and_then> method can be used to create simple chains of dependent tasks,
+each one executing and returning a C<Future> when the previous operation
+succeeds.
+
+ my $f = do_first()
+            ->and_then( sub {
+               return do_second();
+            })
+            ->and_then( sub {
+               return do_third();
+            });
+
+The result of the C<$f> future itself will be the result of the future
+returned by the final function, if none of them failed. If any of them fails
+it will fail with the same value. This can be considered similar to normal
+exception handling in synchronous code; the first time a function call throws
+an exception, the subsequent calls are not made.
+
+=head2 Catching Errors
+
+The C<or_else> method can be used to create error handling logic, similar to
+the kind that can be performed synchronously with C<eval> or L<Try::Tiny>.
+
+ my $f = try_this()
+            ->or_else( sub {
+               return handle_failure();
+            });
+
+The result of the returned future will be what the first function's future
+returned, if it was successful, or else whatever the second function's future
+returned.
+
+As the failure-handling code block is given the failed future, and has to
+return a future; it can return the failed future itself to apply some clean-up
+logic similar to catching but re-throwing an exception:
+
+ my $f = try_this()
+            ->or_else( sub {
+               my $failure = shift;
+               cleanup();
+               return $failure;
+            });
+
+The C<followed_by> method can attach a code block that is run whenever a
+future is ready, regardless of whether it succeeded or failed. This can be
+used to create an additional C<finally>-like block. If the C<followed_by>
+block returns the future it was passed, then the entire combination still
+succeeds or fails according to the result of the first.
+
+ my $f = try_this()
+            ->followed_by( sub {
+               finally_this()
+               return $_[0];
+            });
+
+A combination of C<or_else> and C<followed_by> can create a structure similar
+to the full C<try>/C<catch>/C<finally> semantics.
+
+ my $f = try_this()
+            ->or_else( sub {
+               return catch_this();
+            })
+            ->followed_by( sub {
+               finally_this();
+               return $_[0];
+            });
+
 =head2 Merging Control Flow
 
 A C<wait_all> future may be used to resynchronise control flow, while waiting
@@ -951,7 +1058,7 @@ for multiple concurrent operations to finish.
     say "  bar: ", $f2->get;
  } );
 
-This provides an ability somewhat similar to C<kpar()> or
+This provides an ability somewhat similar to C<CPS::kpar()> or
 L<Async::MergePoint>.
 
 =cut
