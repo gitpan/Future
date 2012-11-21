@@ -85,4 +85,26 @@ use Future;
    ok( $f2->is_cancelled, '$f2 cancelled after a failure' );
 }
 
+# immediately done
+{
+   my $f1 = Future->new->done;
+
+   my $future = Future->wait_any( $f1 );
+
+   ok( $future->is_ready, '$future of already-ready sub already ready' );
+}
+
+# cancel propagation
+{
+   my $f1 = Future->new;
+   my $c1;
+   $f1->on_cancel( sub { $c1++ } );
+
+   my $future = Future->wait_all( $f1 );
+
+   $future->cancel;
+
+   is( $c1, 1, '$future->cancel marks subs cancelled' );
+}
+
 done_testing;

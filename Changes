@@ -1,5 +1,13 @@
 Revision history for Future
 
+0.04    CHANGES:
+         * Fix implementation of sequenced futures to work properly on
+           immediates
+         * Ensure that future->future chaining via callbacks works correctly
+           on immediates
+         * Link to "curry" in the docs about CODE-returning convenience
+           accessors ->done_cb, ->fail_cb and ->cancel_cb
+
 0.03    INCOMPATIBLE CHANGES:
          * Future->needs_all and Future->needs_any now return dependents'
            results

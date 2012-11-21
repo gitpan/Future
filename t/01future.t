@@ -53,17 +53,6 @@ use Future;
    is_deeply( \@on_done_args, [ result => "via cb" ], 'Results via ->done_cb' );
 }
 
-{
-   my $future = Future->new;
-
-   $future->done( already => "done" );
-
-   my @on_done_args;
-   $future->on_done( sub { @on_done_args = @_; } );
-
-   is_deeply( \@on_done_args, [ already => "done" ], 'Results passed to on_done for already-done future' );
-}
-
 # done chaining
 {
    my $future = Future->new;
@@ -83,6 +72,28 @@ use Future;
 
    is_deeply( \@on_done_args_1, [ chained => "result" ], 'Results chained via ->on_done( $f )' );
    is_deeply( \@on_done_args_2, [ chained => "result" ], 'Results chained via ->on_ready( $f )' );
+}
+
+# immediately done
+{
+   my $future = Future->new;
+   $future->done( already => "done" );
+
+   my @on_done_args;
+   $future->on_done( sub { @on_done_args = @_; } );
+
+   is_deeply( \@on_done_args, [ already => "done" ], 'Results passed to on_done for already-done future' );
+
+   my $f1 = Future->new;
+   my $f2 = Future->new;
+
+   $future->on_done( $f1 );
+   $future->on_ready( $f2 );
+
+   ok( $f1->is_ready, 'Chained ->on_done for immediate future' );
+   is_deeply( [ $f1->get ], [ already => "done" ], 'Results from chained via ->on_done for immediate future' );
+   ok( $f2->is_ready, 'Chained ->on_ready for immediate future' );
+   is_deeply( [ $f2->get ], [ already => "done" ], 'Results from chained via ->on_ready for immediate future' );
 }
 
 {
@@ -121,17 +132,6 @@ use Future;
 {
    my $future = Future->new;
 
-   $future->fail( "Already broken" );
-
-   my $failure;
-   $future->on_fail( sub { ( $failure ) = @_; } );
-
-   like( $failure, qr/^Already broken at /, 'Exception passed to on_fail for already-failed future' );
-}
-
-{
-   my $future = Future->new;
-
    my $file = __FILE__;
    my $line = __LINE__+1;
    $future->fail( "Something broke", further => "details" );
@@ -162,6 +162,28 @@ use Future;
 
    is( $failure_1, "Chained failure\n", 'Failure chained via ->on_fail( $f )' );
    is( $failure_2, "Chained failure\n", 'Failure chained via ->on_ready( $f )' );
+}
+
+# immediately failed
+{
+   my $future = Future->new;
+   $future->fail( "Already broken\n" );
+
+   my $failure;
+   $future->on_fail( sub { ( $failure ) = @_; } );
+
+   is( $failure, "Already broken\n", 'Exception passed to on_fail for already-failed future' );
+
+   my $f1 = Future->new;
+   my $f2 = Future->new;
+
+   $future->on_fail( $f1 );
+   $future->on_ready( $f2 );
+
+   ok( $f1->is_ready, 'Chained ->on_done for immediate future' );
+   is_deeply( [ $f1->failure ], [ "Already broken\n" ], 'Results from chained via ->on_done for immediate future' );
+   ok( $f2->is_ready, 'Chained ->on_ready for immediate future' );
+   is_deeply( [ $f2->failure ], [ "Already broken\n" ], 'Results from chained via ->on_ready for immediate future' );
 }
 
 # cancel
@@ -203,6 +225,17 @@ use Future;
 
    $cancel_cb->();
    is( $cancelled, 1, 'Cancellation via ->cancel_cb' );
+}
+
+# immediately cancelled
+{
+   my $future = Future->new;
+   $future->cancel;
+
+   my $called = 0;
+   $future->on_ready( sub { $called++ } );
+
+   is( $called, 1, 'on_ready invoked for already-cancelled future' );
 }
 
 # cancel chaining

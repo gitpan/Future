@@ -78,4 +78,28 @@ use Future;
    ok( $f1->is_cancelled, '$f1 cancelled by $fseq cancel' );
 }
 
+# immediately done
+{
+   my $f1 = Future->new->done;
+
+   my $called = 0;
+   my $fseq = $f1->followed_by(
+      sub { $called++; return $_[0] }
+   );
+
+   is( $called, 1, 'followed_by block invoked immediately for already-done' );
+}
+
+# immediately done
+{
+   my $f1 = Future->new->fail("Failure\n");
+
+   my $called = 0;
+   my $fseq = $f1->followed_by(
+      sub { $called++; return $_[0] }
+   );
+
+   is( $called, 1, 'followed_by block invoked immediately for already-failed' );
+}
+
 done_testing;

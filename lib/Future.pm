@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 use Carp;
 use Scalar::Util qw( weaken );
@@ -123,7 +123,7 @@ sub followed_by
 
    $fseq->on_cancel( sub {
       ( $f2 || $f1 )->cancel
-   } );
+   } ) if not $fseq->is_ready;
 
    return $fseq;
 }
@@ -281,6 +281,10 @@ sub done
 Returns a C<CODE> reference that, when invoked, calls the C<done> method. This
 makes it simple to pass as a callback function to other code.
 
+The same effect can be achieved using L<curry>:
+
+ $code = $future->curry::done;
+
 =cut
 
 sub done_cb
@@ -326,6 +330,10 @@ sub fail
 
 Returns a C<CODE> reference that, when invoked, calls the C<fail> method. This
 makes it simple to pass as a callback function to other code.
+
+The same effect can be achieved using L<curry>:
+
+ $code = $future->curry::fail;
 
 =cut
 
@@ -422,7 +430,12 @@ sub on_ready
    my ( $code ) = @_;
 
    if( $self->is_ready ) {
-      $code->( $self );
+      my $is_future = eval { $code->isa( "Future" ) };
+      my $done = !$self->failure && !$self->is_cancelled;
+
+      $is_future ? ( $done ? $code->done( $self->get )
+                           : $code->fail( $self->failure ) )
+                 : $code->( $self );
    }
    else {
       push @{ $self->{callbacks} }, [ ready => $code ];
@@ -478,8 +491,12 @@ sub on_done
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->is_ready and !$self->failure and !$self->is_cancelled ) {
-      $code->( $self->get );
+   if( $self->is_ready ) {
+      return if $self->failure or $self->is_cancelled;
+
+      my $is_future = eval { $code->isa( "Future" ) };
+      $is_future ? $code->done( $self->get ) 
+                 : $code->( $self->get );
    }
    else {
       push @{ $self->{callbacks} }, [ done => $code ];
@@ -552,8 +569,12 @@ sub on_fail
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->is_ready and $self->failure ) {
-      $code->( $self->failure );
+   if( $self->is_ready ) {
+      return if not $self->failure;
+
+      my $is_future = eval { $code->isa( "Future" ) };
+      $is_future ? $code->fail( $self->failure )
+                 : $code->( $self->failure );
    }
    else {
       push @{ $self->{callbacks} }, [ failed => $code ];
@@ -569,6 +590,8 @@ will invoke all of the code blocks registered by C<on_cancel>, in the reverse
 order. When called on a dependent future, all its component futures are also
 cancelled.
 
+Returns the C<$future>.
+
 =cut
 
 sub cancel
@@ -582,12 +605,18 @@ sub cancel
                  : $cb->( $self );
    }
    $self->_mark_ready;
+
+   return $self;
 }
 
 =head2 $code = $future->cancel_cb
 
 Returns a C<CODE> reference that, when invoked, calls the C<cancel> method.
 This makes it simple to pass as a callback function to other code.
+
+The same effect can be achieved using L<curry>:
+
+ $code = $future->curry::cancel;
 
 =cut
 
@@ -717,7 +746,7 @@ its component futures, in corresponding order. If it fails, its failure will
 be that of the first component future that failed. To access each component
 future's results individually, use C<done_futures>.
 
-(B<NOTE> that this result is different from earlier versions of C<Future>.)
+(B<NOTE>: this result is different from versions of C<Future> before 0.03.)
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -770,7 +799,7 @@ If successful, its result will be that of the first component future that
 succeeded. If it fails, its failure will be that of the last component future
 to fail. To access the other failures, use C<failed_futures>.
 
-(B<NOTE> that this result is different from earlier versions of C<Future>.)
+(B<NOTE>: this result is different from versions of C<Future> before 0.03.)
 
 Normally when this Future completes successfully, only one of its component
 futures will be done. If it is constructed with multiple that are already done
@@ -1060,6 +1089,19 @@ for multiple concurrent operations to finish.
 
 This provides an ability somewhat similar to C<CPS::kpar()> or
 L<Async::MergePoint>.
+
+=cut
+
+=head1 SEE ALSO
+
+=over 4
+
+=item *
+
+L<curry> - Create automatic curried method call closures for any class or
+object
+
+=back
 
 =cut
 

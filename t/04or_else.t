@@ -66,7 +66,7 @@ use Future;
 
    my $f2;
    my $fseq = $f1->or_else(
-      sub { return $f2 = Future->new },
+      sub { return $f2 = Future->new }
    );
 
    $f1->fail( "First failure\n" );
@@ -100,6 +100,31 @@ use Future;
    $fseq->cancel;
 
    ok( $f2->is_cancelled, '$f2 cancelled by $fseq cancel' );
+}
+
+# immediately done
+{
+   my $f1 = Future->new->done;
+
+   my $called = 0;
+   my $fseq = $f1->or_else(
+      sub { $called++; return $_[0] }
+   );
+
+   is( $called, 0, 'or_else block not invoked for already-done' );
+   ok( $fseq->is_ready, '$fseq already ready for already-done' );
+}
+
+# immediately done
+{
+   my $f1 = Future->new->fail("Failure\n");
+
+   my $called = 0;
+   my $fseq = $f1->or_else(
+      sub { $called++; return $_[0] }
+   );
+
+   is( $called, 1, 'or_else block invoked immediately for already-failed' );
 }
 
 done_testing;

@@ -81,14 +81,9 @@ use Future;
    is_refcount( $f2,   1, '$f2 has refcount 1 at end of test' );
 }
 
+# immediately done
 {
-   my $f1 = Future->new;
-   $f1->done;
-
-   my $on_ready_called;
-   $f1->on_ready( sub { $on_ready_called++ } );
-
-   is( $on_ready_called, 1, 'on_ready called synchronously for already ready' );
+   my $f1 = Future->new->done;
 
    my $future = Future->wait_all( $f1 );
 
@@ -97,6 +92,23 @@ use Future;
    identical( $results[0], $f1, 'Results from $future->get of already ready' );
 }
 
+# one immediately done
+{
+   my $f1 = Future->new->done;
+   my $f2 = Future->new;
+
+   my $future = Future->wait_all( $f1, $f2 );
+
+   ok( !$future->is_ready, '$future of partially-done subs not yet ready' );
+
+   $f2->done;
+
+   ok( $future->is_ready, '$future of completely-done subs already ready' );
+   my @results = $future->get;
+   identical( $results[0], $f1, 'Results from $future->get of already ready' );
+}
+
+# cancel propagation
 {
    my $f1 = Future->new;
    my $c1;

@@ -87,7 +87,25 @@ use Future;
               '$future->cancelled_futures after $f1 failure' );
 }
 
-# Cancellation
+# immediately done
+{
+   my $f1 = Future->new->done;
+
+   my $future = Future->needs_all( $f1 );
+
+   ok( $future->is_ready, '$future of already-done sub already ready' );
+}
+
+# immediately fails
+{
+   my $f1 = Future->new->fail( "Failure\n" );
+
+   my $future = Future->needs_all( $f1 );
+
+   ok( $future->is_ready, '$future of already-failed sub already ready' );
+}
+
+# cancel propagation
 {
    my $f1 = Future->new;
    my $c1;

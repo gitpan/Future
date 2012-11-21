@@ -102,6 +102,10 @@ IMPLEMENTATION METHODS
     Returns a `CODE' reference that, when invoked, calls the `done' method.
     This makes it simple to pass as a callback function to other code.
 
+    The same effect can be achieved using curry:
+
+     $code = $future->curry::done;
+
   $future->fail( $exception, @details )
     Marks that the leaf future has failed, and provides an exception value.
     This exception will be thrown by the `get' method if called. If the
@@ -119,6 +123,10 @@ IMPLEMENTATION METHODS
   $code = $future->fail_cb
     Returns a `CODE' reference that, when invoked, calls the `fail' method.
     This makes it simple to pass as a callback function to other code.
+
+    The same effect can be achieved using curry:
+
+     $code = $future->curry::fail;
 
   $future->on_cancel( $code )
     If the future is not yet ready, adds a callback to be invoked if the
@@ -241,10 +249,16 @@ USER METHODS
     the reverse order. When called on a dependent future, all its component
     futures are also cancelled.
 
+    Returns the `$future'.
+
   $code = $future->cancel_cb
     Returns a `CODE' reference that, when invoked, calls the `cancel'
     method. This makes it simple to pass as a callback function to other
     code.
+
+    The same effect can be achieved using curry:
+
+     $code = $future->curry::cancel;
 
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and
@@ -281,7 +295,7 @@ DEPENDENT FUTURES
     failure will be that of the first component future that failed. To
     access each component future's results individually, use `done_futures'.
 
-    (NOTE that this result is different from earlier versions of `Future'.)
+    (NOTE: this result is different from versions of `Future' before 0.03.)
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -298,7 +312,7 @@ DEPENDENT FUTURES
     component future to fail. To access the other failures, use
     `failed_futures'.
 
-    (NOTE that this result is different from earlier versions of `Future'.)
+    (NOTE: this result is different from versions of `Future' before 0.03.)
 
     Normally when this Future completes successfully, only one of its
     component futures will be done. If it is constructed with multiple that
@@ -504,6 +518,10 @@ EXAMPLES
 
     This provides an ability somewhat similar to `CPS::kpar()' or
     Async::MergePoint.
+
+SEE ALSO
+    *   curry - Create automatic curried method call closures for any class
+        or object
 
 AUTHOR
     Paul Evans <leonerd@leonerd.org.uk>
