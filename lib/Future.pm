@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use Carp;
 use Scalar::Util qw( weaken );
@@ -50,6 +50,40 @@ The implementation and the user of such an interface would typically make use
 of different methods on the class. The methods below are documented in two
 sections; those of interest to each side of the interface.
 
+=head2 SUBCLASSING
+
+This class easily supports being subclassed to provide extra behavior, such as
+giving the C<get> method the ability to block and wait for completion. This
+may be useful to provide C<Future> subclasses with event systems, or similar.
+
+Each method that returns a new C<Future> object will use the invocant to
+construct its return value. If the constructor needs to perform per-instance
+setup it can override the C<new> method, and take context from the given
+instance.
+
+ sub new
+ {
+    my $proto = shift;
+    my $self = $proto->SUPER::new;
+
+    if( ret $proto ) {
+       # Prototype was an instance
+    }
+    else {
+       # Prototype was a class
+    }
+
+    return $self;
+ }
+
+If an instance provides a method called C<await>, this will be called by the
+C<get> and C<failure> methods if the instance is pending.
+
+ $f->await
+
+The F<examples> directory in the distribution contains some examples of how
+C<Future>s might be integrated with various event systems.
+
 =cut
 
 =head1 CONSTRUCTORS
@@ -58,8 +92,13 @@ sections; those of interest to each side of the interface.
 
 =head2 $future = Future->new
 
+=head2 $future = $orig->new
+
 Returns a new C<Future> instance to represent a leaf future. It will be marked
-as ready by any of the C<done>, C<fail>, or C<cancel> methods.
+as ready by any of the C<done>, C<fail>, or C<cancel> methods. It can be
+called either as a class method, or as an instance method. Called on an
+instance it will construct another in the same class, and is useful for
+subclassing.
 
 This constructor would primarily be used by implementations of asynchronous
 interfaces.
@@ -68,11 +107,11 @@ interfaces.
 
 sub new
 {
-   my $class = shift;
+   my $proto = shift;
    return bless {
       ready     => 0,
       callbacks => [],
-   }, $class;
+   }, ( ref $proto || $proto );
 }
 
 =head2 $future = $f1->followed_by( \&code )
@@ -96,7 +135,7 @@ sub followed_by
    my $f1 = shift;
    my ( $code ) = @_;
 
-   my $fseq = Future->new;
+   my $fseq = $f1->new;
 
    my $f2;
 
@@ -209,10 +248,10 @@ sub transform
    return $self->followed_by( sub {
       my $self = shift;
       if( !$self->failure ) {
-         return Future->new->done( $xfrm_done ? $xfrm_done->( $self->get ) : $self->get );
+         return $self->new->done( $xfrm_done ? $xfrm_done->( $self->get ) : $self->get );
       }
       else {
-         return Future->new->fail( $xfrm_fail ? $xfrm_fail->( $self->failure ) : $self->failure );
+         return $self->new->fail( $xfrm_fail ? $xfrm_fail->( $self->failure ) : $self->failure );
       }
    });
 }
@@ -457,10 +496,16 @@ If it is not yet ready, or was cancelled, an exception is thrown.
 
 =cut
 
+sub await
+{
+   my $self = shift;
+   croak "$self is not yet complete";
+}
+
 sub get
 {
    my $self = shift;
-   $self->is_ready or croak "$self is not yet complete";
+   $self->await until $self->is_ready;
    die $self->{failure}->[0] if $self->{failure};
    $self->is_cancelled and croak "$self was cancelled";
    return @{ $self->{result} };
@@ -532,7 +577,7 @@ statement:
 sub failure
 {
    my $self = shift;
-   $self->is_ready or croak "$self is not yet complete";
+   $self->await until $self->is_ready;
    return unless $self->{failure};
    return $self->{failure}->[0] if !wantarray;
    return @{ $self->{failure} };
@@ -630,14 +675,16 @@ sub cancel_cb
 
 The following constructors all take a list of component futures, and return a
 new future whose readiness somehow depends on the readiness of those
-components.
+components. The first component future will be used as the prototype for
+constructing the return value, so it respects subclassing correctly.
 
 =cut
 
 sub _new_dependent
 {
-   my $self = shift->new;
+   shift; # ignore this class
    my ( $subs ) = @_;
+   my $self = $subs->[0]->new;
 
    eval { $_->isa( "Future" ) } or croak "Expected a Future, got $_" for @$subs;
 

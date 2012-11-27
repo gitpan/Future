@@ -34,10 +34,48 @@ DESCRIPTION
     The methods below are documented in two sections; those of interest to
     each side of the interface.
 
+  SUBCLASSING
+    This class easily supports being subclassed to provide extra behavior,
+    such as giving the `get' method the ability to block and wait for
+    completion. This may be useful to provide `Future' subclasses with event
+    systems, or similar.
+
+    Each method that returns a new `Future' object will use the invocant to
+    construct its return value. If the constructor needs to perform
+    per-instance setup it can override the `new' method, and take context
+    from the given instance.
+
+     sub new
+     {
+        my $proto = shift;
+        my $self = $proto->SUPER::new;
+
+        if( ret $proto ) {
+           # Prototype was an instance
+        }
+        else {
+           # Prototype was a class
+        }
+
+        return $self;
+     }
+
+    If an instance provides a method called `await', this will be called by
+    the `get' and `failure' methods if the instance is pending.
+
+     $f->await
+
+    The examples directory in the distribution contains some examples of how
+    `Future's might be integrated with various event systems.
+
 CONSTRUCTORS
   $future = Future->new
+  $future = $orig->new
     Returns a new `Future' instance to represent a leaf future. It will be
-    marked as ready by any of the `done', `fail', or `cancel' methods.
+    marked as ready by any of the `done', `fail', or `cancel' methods. It
+    can be called either as a class method, or as an instance method. Called
+    on an instance it will construct another in the same class, and is
+    useful for subclassing.
 
     This constructor would primarily be used by implementations of
     asynchronous interfaces.
@@ -263,7 +301,9 @@ USER METHODS
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and
     return a new future whose readiness somehow depends on the readiness of
-    those components.
+    those components. The first component future will be used as the
+    prototype for constructing the return value, so it respects subclassing
+    correctly.
 
   $future = Future->wait_all( @subfutures )
     Returns a new `Future' instance that will indicate it is ready once all

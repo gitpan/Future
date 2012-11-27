@@ -1,5 +1,12 @@
 Revision history for Future
 
+0.05    CHANGES:
+         * Respect subclassing by allowing ->new on instances
+         * Allow subclasses to provide an ->await method which will be used
+           by ->get and ->failure
+         * Added some example scripts to demonstrate how to use Futures with
+           various event systems
+
 0.04    CHANGES:
          * Fix implementation of sequenced futures to work properly on
            immediates
