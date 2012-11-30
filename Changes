@@ -1,5 +1,9 @@
 Revision history for Future
 
+0.06    CHANGES:
+         * Remembered to actually include the example scripts. No other actual
+           code changes.
+
 0.05    CHANGES:
          * Respect subclassing by allowing ->new on instances
          * Allow subclasses to provide an ->await method which will be used
