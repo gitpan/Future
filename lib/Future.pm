@@ -8,10 +8,12 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use Carp;
 use Scalar::Util qw( weaken );
+
+use constant DEBUG => $ENV{PERL_FUTURE_DEBUG};
 
 =head1 NAME
 
@@ -84,6 +86,36 @@ C<get> and C<failure> methods if the instance is pending.
 The F<examples> directory in the distribution contains some examples of how
 C<Future>s might be integrated with various event systems.
 
+=head2 DEBUGGING
+
+By the time a C<Future> object is destroyed, it ought to have been completed
+or cancelled. By enabling debug tracing of objects, this fact can be checked.
+If a C<Future> object is destroyed without having been completed or cancelled,
+a warning message is printed.
+
+This feature is enabled by setting an environment variable called
+C<PERL_FUTURE_DEBUG> to some true value.
+
+ $ PERL_FUTURE_DEBUG=1 perl -MFuture -E 'my $f = Future->new'
+ Future=HASH(0xaa61f8) was constructed at -e line 1 and was lost near -e line 0 before it was ready.
+
+Note that due to a limitation of perl's C<caller> function within a C<DESTROY>
+destructor method, the exact location of the leak cannot be accurately
+determined. Often the leak will occur due to falling out of scope by returning
+from a function; in this case the leak location may be reported as being the
+line following the line calling that function.
+
+ $ PERL_FUTURE_DEBUG=1 perl -MFuture
+ sub foo {
+    my $f = Future->new;
+ }
+ 
+ foo();
+ print "Finished\n";
+ 
+ Future=HASH(0x14a2220) was constructed at - line 2 and was lost near - line 6 before it was ready.
+ Finished
+
 =cut
 
 =head1 CONSTRUCTORS
@@ -111,8 +143,26 @@ sub new
    return bless {
       ready     => 0,
       callbacks => [],
+      ( DEBUG ? ( constructed_at => join " line ", (caller)[1,2] ) : () ),
    }, ( ref $proto || $proto );
 }
+
+my $GLOBAL_END;
+END { $GLOBAL_END = 1; }
+
+*DESTROY = sub {
+   my $self = shift;
+   return if $GLOBAL_END;
+
+   return if $self->is_ready;
+
+   my $lost_at = join " line ", (caller)[1,2];
+   # We can't actually know the real line where the last reference was lost; 
+   # a variable set to 'undef' or close of scope, because caller can't see it;
+   # the current op has already been updated. The best we can do is indicate
+   # 'near'.
+   warn "$self was constructed at $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
+} if DEBUG;
 
 =head2 $future = $f1->followed_by( \&code )
 

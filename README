@@ -68,6 +68,35 @@ DESCRIPTION
     The examples directory in the distribution contains some examples of how
     `Future's might be integrated with various event systems.
 
+  DEBUGGING
+    By the time a `Future' object is destroyed, it ought to have been
+    completed or cancelled. By enabling debug tracing of objects, this fact
+    can be checked. If a `Future' object is destroyed without having been
+    completed or cancelled, a warning message is printed.
+
+    This feature is enabled by setting an environment variable called
+    `PERL_FUTURE_DEBUG' to some true value.
+
+     $ PERL_FUTURE_DEBUG=1 perl -MFuture -E 'my $f = Future->new'
+     Future=HASH(0xaa61f8) was constructed at -e line 1 and was lost near -e line 0 before it was ready.
+
+    Note that due to a limitation of perl's `caller' function within a
+    `DESTROY' destructor method, the exact location of the leak cannot be
+    accurately determined. Often the leak will occur due to falling out of
+    scope by returning from a function; in this case the leak location may
+    be reported as being the line following the line calling that function.
+
+     $ PERL_FUTURE_DEBUG=1 perl -MFuture
+     sub foo {
+        my $f = Future->new;
+     }
+ 
+     foo();
+     print "Finished\n";
+ 
+     Future=HASH(0x14a2220) was constructed at - line 2 and was lost near - line 6 before it was ready.
+     Finished
+
 CONSTRUCTORS
   $future = Future->new
   $future = $orig->new

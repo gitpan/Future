@@ -1,5 +1,8 @@
 Revision history for Future
 
+0.07    CHANGES:
+         * Leak debugging
+
 0.06    CHANGES:
          * Remembered to actually include the example scripts. No other actual
            code changes.
