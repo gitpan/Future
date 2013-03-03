@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 
 use strict;
+use warnings;
 
 use Test::More;
 use Test::Fatal;
@@ -35,6 +36,7 @@ use Future;
 
    ok( $future->is_ready, '$future is now ready' );
    is_deeply( [ $future->get ], [ result => "here" ], 'Results from $future->get' );
+   is( scalar $future->get, "result", 'Result from scalar $future->get' );
 
    is_oneref( $future, '$future has refcount 1 at end of test' );
 }
@@ -211,6 +213,8 @@ use Future;
    is( $ready, 1, '$future on_ready still called by cancel' );
 
    like( exception { $future->get }, qr/cancelled/, '$future->get throws exception by cancel' );
+
+   ok( !exception { $future->cancel }, '$future->cancel a second time is OK' );
 }
 
 # cancel_cb

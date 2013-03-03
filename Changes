@@ -1,5 +1,14 @@
 Revision history for Future
 
+0.08    CHANGES:
+         * Ignore attempts to cancel already-complete or already-cancelled
+           futures, or to attach ->on_cancel callbacks to them
+         * $future->get should return the first result in scalar context
+         * Added Future::Utils with repeat { ...} and
+           repeat_until_success { ... } looping constructs
+
+         * Link to LPW2012 talk slides
+
 0.07    CHANGES:
          * Leak debugging
 

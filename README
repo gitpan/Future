@@ -3,19 +3,21 @@ NAME
 
 SYNOPSIS
      my $future = Future->new;
+
+     perform_some_operation(
+        on_complete => sub {
+           $future->done( @_ );
+        }
+     );
+
      $future->on_ready( sub {
         say "The operation is complete";
      } );
 
-     kperform_some_operation( sub {
-        $future->done( @_ );
-     } );
-
 DESCRIPTION
-    An `Future' object represents an operation that is currently in
-    progress, or has recently completed. It can be used in a variety of ways
-    to manage the flow of control, and data, through an asynchronous
-    program.
+    A `Future' object represents an operation that is currently in progress,
+    or has recently completed. It can be used in a variety of ways to manage
+    the flow of control, and data, through an asynchronous program.
 
     Some futures represent a single operation and are explicitly marked as
     ready by calling the `done' or `fail' methods. These are called "leaf"
@@ -34,6 +36,9 @@ DESCRIPTION
     The methods below are documented in two sections; those of interest to
     each side of the interface.
 
+    See also Future::Utils which contains useful loop-constructing
+    functions, to run a `Future'-returning function repeatedly in a loop.
+
   SUBCLASSING
     This class easily supports being subclassed to provide extra behavior,
     such as giving the `get' method the ability to block and wait for
@@ -50,7 +55,7 @@ DESCRIPTION
         my $proto = shift;
         my $self = $proto->SUPER::new;
 
-        if( ret $proto ) {
+        if( ref $proto ) {
            # Prototype was an instance
         }
         else {
@@ -207,7 +212,8 @@ IMPLEMENTATION METHODS
 
   $future->on_cancel( $f )
     If passed another `Future' instance, the passed instance will be
-    cancelled when the original future is cancelled.
+    cancelled when the original future is cancelled. This method does
+    nothing if the future is already complete.
 
   $cancelled = $future->is_cancelled
     Returns true if the future has been cancelled by `cancel'.
@@ -242,10 +248,12 @@ USER METHODS
     successfully or fails respectively.
 
   @result = $future->get
+  $result = $future->get
     If the future is ready and completed successfully, returns the list of
     results that had earlier been given to the `done' method on a leaf
     future, or the list of component futures it was waiting for on a
-    dependent future.
+    dependent future. In scalar context it returns just the first result
+    value.
 
     If the future is ready but failed, this method raises as an exception
     the failure string or object that was given to the `fail' method.
@@ -314,7 +322,8 @@ USER METHODS
     Requests that the future be cancelled, immediately marking it as ready.
     This will invoke all of the code blocks registered by `on_cancel', in
     the reverse order. When called on a dependent future, all its component
-    futures are also cancelled.
+    futures are also cancelled. It is not an error to attempt to cancel a
+    Future that is already complete or cancelled; it simply has no effect.
 
     Returns the `$future'.
 
@@ -591,6 +600,12 @@ EXAMPLES
 SEE ALSO
     *   curry - Create automatic curried method call closures for any class
         or object
+
+    *   "The Past, The Present and The Future" - slides from a talk given at
+        the London Perl Workshop, 2012.
+
+        https://docs.google.com/presentation/d/1UkV5oLcTOOXBXPh8foyxko4PR28_
+        zU_aVx6gBms7uoo/edit
 
 AUTHOR
     Paul Evans <leonerd@leonerd.org.uk>

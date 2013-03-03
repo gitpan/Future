@@ -4,6 +4,7 @@ examples/anyevent.pl
 examples/io-async.pl
 examples/poe.pl
 lib/Future.pm
+lib/Future/Utils.pm
 LICENSE
 Makefile.PL
 MANIFEST			This list of files
@@ -22,4 +23,6 @@ t/12needs_all.t
 t/13needs_any.t
 t/20subclass.t
 t/21debug.t
+t/30utils-repeat.t
+t/31utils-repeat-foreach.t
 t/99pod.t

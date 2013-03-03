@@ -1,14 +1,14 @@
 #  You may distribute under the terms of either the GNU General Public License
 #  or the Artistic License (the same terms as Perl itself)
 #
-#  (C) Paul Evans, 2011-2012 -- leonerd@leonerd.org.uk
+#  (C) Paul Evans, 2011-2013 -- leonerd@leonerd.org.uk
 
 package Future;
 
 use strict;
 use warnings;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 use Carp;
 use Scalar::Util qw( weaken );
@@ -22,17 +22,20 @@ C<Future> - represent an operation awaiting completion
 =head1 SYNOPSIS
 
  my $future = Future->new;
+
+ perform_some_operation(
+    on_complete => sub {
+       $future->done( @_ );
+    }
+ );
+
  $future->on_ready( sub {
     say "The operation is complete";
  } );
 
- kperform_some_operation( sub {
-    $future->done( @_ );
- } );
-
 =head1 DESCRIPTION
 
-An C<Future> object represents an operation that is currently in progress, or
+A C<Future> object represents an operation that is currently in progress, or
 has recently completed. It can be used in a variety of ways to manage the flow
 of control, and data, through an asynchronous program.
 
@@ -52,6 +55,9 @@ The implementation and the user of such an interface would typically make use
 of different methods on the class. The methods below are documented in two
 sections; those of interest to each side of the interface.
 
+See also L<Future::Utils> which contains useful loop-constructing functions,
+to run a C<Future>-returning function repeatedly in a loop.
+
 =head2 SUBCLASSING
 
 This class easily supports being subclassed to provide extra behavior, such as
@@ -68,7 +74,7 @@ instance.
     my $proto = shift;
     my $self = $proto->SUPER::new;
 
-    if( ret $proto ) {
+    if( ref $proto ) {
        # Prototype was an instance
     }
     else {
@@ -446,14 +452,15 @@ to that in which they were registered.
 =head2 $future->on_cancel( $f )
 
 If passed another C<Future> instance, the passed instance will be cancelled
-when the original future is cancelled.
+when the original future is cancelled. This method does nothing if the future
+is already complete.
 
 =cut
 
 sub on_cancel
 {
    my $self = shift;
-   $self->is_ready and croak "$self is already complete and cannot register more ->on_cancel handlers";
+   $self->is_ready and return;
    push @{ $self->{on_cancel} }, @_;
 }
 
@@ -535,9 +542,12 @@ sub on_ready
 
 =head2 @result = $future->get
 
-If the future is ready and completed successfully, returns the list of 
+=head2 $result = $future->get
+
+If the future is ready and completed successfully, returns the list of
 results that had earlier been given to the C<done> method on a leaf future,
-or the list of component futures it was waiting for on a dependent future.
+or the list of component futures it was waiting for on a dependent future. In
+scalar context it returns just the first result value.
 
 If the future is ready but failed, this method raises as an exception the
 failure string or object that was given to the C<fail> method.
@@ -558,6 +568,7 @@ sub get
    $self->await until $self->is_ready;
    die $self->{failure}->[0] if $self->{failure};
    $self->is_cancelled and croak "$self was cancelled";
+   return $self->{result}->[0] unless wantarray;
    return @{ $self->{result} };
 }
 
@@ -683,7 +694,8 @@ sub on_fail
 Requests that the future be cancelled, immediately marking it as ready. This
 will invoke all of the code blocks registered by C<on_cancel>, in the reverse
 order. When called on a dependent future, all its component futures are also
-cancelled.
+cancelled. It is not an error to attempt to cancel a Future that is already
+complete or cancelled; it simply has no effect.
 
 Returns the C<$future>.
 
@@ -692,6 +704,8 @@ Returns the C<$future>.
 sub cancel
 {
    my $self = shift;
+
+   return if $self->is_ready;
 
    $self->{cancelled}++;
    foreach my $cb ( reverse @{ $self->{on_cancel} || [] } ) {
@@ -1197,6 +1211,13 @@ L<Async::MergePoint>.
 
 L<curry> - Create automatic curried method call closures for any class or
 object
+
+=item *
+
+"The Past, The Present and The Future" - slides from a talk given at the
+London Perl Workshop, 2012.
+
+L<https://docs.google.com/presentation/d/1UkV5oLcTOOXBXPh8foyxko4PR28_zU_aVx6gBms7uoo/edit>
 
 =back
 
