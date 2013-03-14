@@ -8,9 +8,9 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
-use Carp;
+use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken );
 
 use constant DEBUG => $ENV{PERL_FUTURE_DEBUG};
@@ -363,8 +363,8 @@ sub done
 {
    my $self = shift;
 
-   $self->is_ready and croak "$self is already complete and cannot be ->done twice";
-   $self->{subs} and croak "$self is not a leaf Future, cannot be ->done";
+   $self->is_ready and Carp::croak "$self is already complete and cannot be ->done twice";
+   $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
    $self->{result} = [ @_ ];
    $self->_mark_ready;
 
@@ -391,9 +391,7 @@ sub done_cb
 =head2 $future->fail( $exception, @details )
 
 Marks that the leaf future has failed, and provides an exception value. This
-exception will be thrown by the C<get> method if called. If the exception is a
-non-reference that does not end in a linefeed, its value will be extended by
-the file and line number of the caller, similar to the logic that C<die> uses.
+exception will be thrown by the C<get> method if called. 
 
 The exception must evaluate as a true value; false exceptions are not allowed.
 Further details may be provided that will be returned by the C<failure> method
@@ -409,12 +407,9 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
-   $self->is_ready and croak "$self is already complete and cannot be ->fail'ed";
-   $self->{subs} and croak "$self is not a leaf Future, cannot be ->fail'ed";
-   $_[0] or croak "$self ->fail requires an exception that is true";
-   if( !ref $exception and $exception !~ m/\n$/ ) {
-      $exception .= sprintf " at %s line %d\n", (caller)[1,2];
-   }
+   $self->is_ready and Carp::croak "$self is already complete and cannot be ->fail'ed";
+   $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
+   $_[0] or Carp::croak "$self ->fail requires an exception that is true";
    $self->{failure} = [ $exception, @details ];
    $self->_mark_ready;
 
@@ -436,6 +431,28 @@ sub fail_cb
 {
    my $self = shift;
    return sub { $self->fail( @_ ) };
+}
+
+=head2 $future->die( $message, @details )
+
+A convenient wrapper around C<fail>. If the exception is a non-reference that
+does not end in a linefeed, its value will be extended by the file and line
+number of the caller, similar to the logic that C<die> uses.
+
+Returns the C<$future>.
+
+=cut
+
+sub die
+{
+   my $self = shift;
+   my ( $exception, @details ) = @_;
+
+   if( !ref $exception and $exception !~ m/\n$/ ) {
+      $exception .= sprintf " at %s line %d\n", (caller)[1,2];
+   }
+
+   $self->fail( $exception, @details );
 }
 
 =head2 $future->on_cancel( $code )
@@ -559,15 +576,18 @@ If it is not yet ready, or was cancelled, an exception is thrown.
 sub await
 {
    my $self = shift;
-   croak "$self is not yet complete";
+   Carp::croak "$self is not yet complete";
 }
 
 sub get
 {
    my $self = shift;
    $self->await until $self->is_ready;
-   die $self->{failure}->[0] if $self->{failure};
-   $self->is_cancelled and croak "$self was cancelled";
+   if( $self->{failure} ) {
+      my $exception = $self->{failure}->[0];
+      !ref $exception && $exception =~ m/\n$/ ? CORE::die $exception : Carp::croak $exception;
+   }
+   $self->is_cancelled and Carp::croak "$self was cancelled";
    return $self->{result}->[0] unless wantarray;
    return @{ $self->{result} };
 }
@@ -750,7 +770,7 @@ sub _new_dependent
    my ( $subs ) = @_;
    my $self = $subs->[0]->new;
 
-   eval { $_->isa( "Future" ) } or croak "Expected a Future, got $_" for @$subs;
+   eval { $_->isa( "Future" ) } or Carp::croak "Expected a Future, got $_" for @$subs;
 
    $self->{subs} = $subs;
 
@@ -982,35 +1002,35 @@ component futures.
 sub pending_futures
 {
    my $self = shift;
-   $self->{subs} or croak "Cannot call ->pending_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->pending_futures on a non-dependent Future";
    return grep { not $_->is_ready } @{ $self->{subs} };
 }
 
 sub ready_futures
 {
    my $self = shift;
-   $self->{subs} or croak "Cannot call ->ready_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->ready_futures on a non-dependent Future";
    return grep { $_->is_ready } @{ $self->{subs} };
 }
 
 sub done_futures
 {
    my $self = shift;
-   $self->{subs} or croak "Cannot call ->done_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->done_futures on a non-dependent Future";
    return grep { $_->is_ready and not $_->failure and not $_->is_cancelled } @{ $self->{subs} };
 }
 
 sub failed_futures
 {
    my $self = shift;
-   $self->{subs} or croak "Cannot call ->failed_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->failed_futures on a non-dependent Future";
    return grep { $_->is_ready and $_->failure } @{ $self->{subs} };
 }
 
 sub cancelled_futures
 {
    my $self = shift;
-   $self->{subs} or croak "Cannot call ->cancelled_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->cancelled_futures on a non-dependent Future";
    return grep { $_->is_ready and $_->is_cancelled } @{ $self->{subs} };
 }
 
@@ -1032,7 +1052,7 @@ indicate when it is complete.
 
     my $future = Future->new;
 
-    kdo_something(
+    do_something_async(
        foo => $args{foo},
        on_done => sub { $future->done( @_ ); },
     );
@@ -1041,15 +1061,14 @@ indicate when it is complete.
  }
 
 In most cases, the C<done> method will simply be invoked with the entire
-result list as its arguments. In that case, it is simpler to pass the
-C<$future> object itself as if it was a C<CODE> reference; this will invoke
-the C<done> method.
+result list as its arguments. In that case, it is simpler to use the
+C<done_cb> wrapper method to create the C<CODE> reference.
 
     my $future = Future->new;
 
-    kdo_something(
+    do_something_async(
        foo => $args{foo},
-       on_done => $future,
+       on_done => $future->done_cb,
     );
 
 The caller may then use this future to wait for a result using the C<on_ready>
@@ -1068,7 +1087,7 @@ Because the stored exception value of a failed future may not be false, the
 C<failure> method can be used in a conditional statement to detect success or
 failure.
 
- my $f = koperation( foo => "something" );
+ my $f = foperation( foo => "something" );
 
  $f->on_ready( sub {
     my $f = shift;
@@ -1099,6 +1118,18 @@ called I<Exception Hoisting>).
     };
  } );
 
+Even neater still may be the separate use of the C<on_done> and C<on_fail>
+methods.
+
+ $f->on_done( sub {
+    my @result = @_;
+    say "The operation succeeded with: ", @result;
+ } );
+ $f->on_fail( sub {
+    my ( $failure ) = @_;
+    say "The operation failed with: $failure";
+ } );
+
 =head2 Immediate Futures
 
 Because the C<done> method returns the future object itself, it can be used to
@@ -1106,10 +1137,10 @@ generate a C<Future> that is immediately ready with a result.
 
  my $f = Future->new->done( $value );
 
-Similarly, the C<fail> method can be used to generate a C<Future> that is
-immediately failed.
+Similarly, the C<fail> and C<die> methods can be used to generate a C<Future>
+that is immediately failed.
 
- my $f = Future->new->fail( "This is never going to work" );
+ my $f = Future->new->die( "This is never going to work" );
 
 This could be considered similarly to a C<die> call.
 
@@ -1129,7 +1160,7 @@ succeeds.
 
 The result of the C<$f> future itself will be the result of the future
 returned by the final function, if none of them failed. If any of them fails
-it will fail with the same value. This can be considered similar to normal
+it will fail with the same failure. This can be considered similar to normal
 exception handling in synchronous code; the first time a function call throws
 an exception, the subsequent calls are not made.
 
@@ -1187,8 +1218,8 @@ to the full C<try>/C<catch>/C<finally> semantics.
 A C<wait_all> future may be used to resynchronise control flow, while waiting
 for multiple concurrent operations to finish.
 
- my $f1 = koperation( foo => "something" );
- my $f2 = koperation( bar => "something else" );
+ my $f1 = foperation( foo => "something" );
+ my $f2 = foperation( bar => "something else" );
 
  my $f = Future->wait_all( $f1, $f2 );
 

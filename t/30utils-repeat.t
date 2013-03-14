@@ -4,15 +4,18 @@ use strict;
 use warnings;
 
 use Test::More;
+use Test::Identity;
 
 use Future;
 use Future::Utils qw( repeat repeat_until_success );
 
 {
    my $trial_f;
+   my $previous_trial;
    my $arg;
    my $again;
    my $future = repeat {
+      $previous_trial = shift;
       return $trial_f = Future->new
    } while => sub { $arg = shift; $again };
 
@@ -20,11 +23,15 @@ use Future::Utils qw( repeat repeat_until_success );
 
    ok( defined $trial_f, 'An initial future is running' );
 
+   my $first_f = $trial_f;
+
    $again = 1;
    $trial_f->done( "one" );
 
    ok( defined $arg, '$arg defined for while test' );
    is( scalar $arg->get, "one", '$arg->get for first' );
+
+   identical( $previous_trial, $first_f, 'code block is passed previous trial' );
 
    $again = 0;
    $trial_f->done( "two" );

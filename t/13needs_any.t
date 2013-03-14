@@ -108,14 +108,14 @@ use Future;
 
    $f1->fail( "Partly fails" );
 
-   my $file = __FILE__;
-   my $line = __LINE__+1;
    $f2->fail( "It fails" );
 
    is( $ready, 1, '$future is now ready' );
 
    ok( $future->is_ready, '$future now ready after f2 fails' );
-   is( $future->failure, "It fails at $file line $line\n", '$future->failure yields exception' );
+   is( $future->failure, "It fails", '$future->failure yields exception' );
+   my $file = __FILE__;
+   my $line = __LINE__ + 1;
    is( exception { $future->get }, "It fails at $file line $line\n", '$future->get throws exception' );
 
    is_deeply( [ $future->failed_futures ],
@@ -134,7 +134,7 @@ use Future;
 
 # immediately fails
 {
-   my $f1 = Future->new->fail( "Failure\n" );
+   my $f1 = Future->new->fail( "Failure" );
 
    my $future = Future->needs_any( $f1 );
 

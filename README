@@ -180,10 +180,7 @@ IMPLEMENTATION METHODS
 
   $future->fail( $exception, @details )
     Marks that the leaf future has failed, and provides an exception value.
-    This exception will be thrown by the `get' method if called. If the
-    exception is a non-reference that does not end in a linefeed, its value
-    will be extended by the file and line number of the caller, similar to
-    the logic that `die' uses.
+    This exception will be thrown by the `get' method if called.
 
     The exception must evaluate as a true value; false exceptions are not
     allowed. Further details may be provided that will be returned by the
@@ -199,6 +196,13 @@ IMPLEMENTATION METHODS
     The same effect can be achieved using curry:
 
      $code = $future->curry::fail;
+
+  $future->die( $message, @details )
+    A convenient wrapper around `fail'. If the exception is a non-reference
+    that does not end in a linefeed, its value will be extended by the file
+    and line number of the caller, similar to the logic that `die' uses.
+
+    Returns the `$future'.
 
   $future->on_cancel( $code )
     If the future is not yet ready, adds a callback to be invoked if the
@@ -430,7 +434,7 @@ EXAMPLES
 
         my $future = Future->new;
 
-        kdo_something(
+        do_something_async(
            foo => $args{foo},
            on_done => sub { $future->done( @_ ); },
         );
@@ -439,15 +443,14 @@ EXAMPLES
      }
 
     In most cases, the `done' method will simply be invoked with the entire
-    result list as its arguments. In that case, it is simpler to pass the
-    `$future' object itself as if it was a `CODE' reference; this will
-    invoke the `done' method.
+    result list as its arguments. In that case, it is simpler to use the
+    `done_cb' wrapper method to create the `CODE' reference.
 
         my $future = Future->new;
 
-        kdo_something(
+        do_something_async(
            foo => $args{foo},
-           on_done => $future,
+           on_done => $future->done_cb,
         );
 
     The caller may then use this future to wait for a result using the
@@ -465,7 +468,7 @@ EXAMPLES
     the `failure' method can be used in a conditional statement to detect
     success or failure.
 
-     my $f = koperation( foo => "something" );
+     my $f = foperation( foo => "something" );
 
      $f->on_ready( sub {
         my $f = shift;
@@ -497,16 +500,28 @@ EXAMPLES
         };
      } );
 
+    Even neater still may be the separate use of the `on_done' and `on_fail'
+    methods.
+
+     $f->on_done( sub {
+        my @result = @_;
+        say "The operation succeeded with: ", @result;
+     } );
+     $f->on_fail( sub {
+        my ( $failure ) = @_;
+        say "The operation failed with: $failure";
+     } );
+
   Immediate Futures
     Because the `done' method returns the future object itself, it can be
     used to generate a `Future' that is immediately ready with a result.
 
      my $f = Future->new->done( $value );
 
-    Similarly, the `fail' method can be used to generate a `Future' that is
-    immediately failed.
+    Similarly, the `fail' and `die' methods can be used to generate a
+    `Future' that is immediately failed.
 
-     my $f = Future->new->fail( "This is never going to work" );
+     my $f = Future->new->die( "This is never going to work" );
 
     This could be considered similarly to a `die' call.
 
@@ -525,7 +540,7 @@ EXAMPLES
 
     The result of the `$f' future itself will be the result of the future
     returned by the final function, if none of them failed. If any of them
-    fails it will fail with the same value. This can be considered similar
+    fails it will fail with the same failure. This can be considered similar
     to normal exception handling in synchronous code; the first time a
     function call throws an exception, the subsequent calls are not made.
 
@@ -583,8 +598,8 @@ EXAMPLES
     A `wait_all' future may be used to resynchronise control flow, while
     waiting for multiple concurrent operations to finish.
 
-     my $f1 = koperation( foo => "something" );
-     my $f2 = koperation( bar => "something else" );
+     my $f1 = foperation( foo => "something" );
+     my $f2 = foperation( bar => "something else" );
 
      my $f = Future->wait_all( $f1, $f2 );
 

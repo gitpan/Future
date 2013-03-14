@@ -105,16 +105,16 @@ use Future;
    my $failure;
    $future->on_fail( sub { ( $failure ) = @_; } );
 
-   my $file = __FILE__;
-   my $line = __LINE__+1;
    identical( $future->fail( "Something broke" ), $future, '->fail returns $future' );
 
    ok( $future->is_ready, '$future->fail marks future ready' );
 
-   is( scalar $future->failure, "Something broke at $file line $line\n", '$future->failure yields exception' );
+   is( scalar $future->failure, "Something broke", '$future->failure yields exception' );
+   my $file = __FILE__;
+   my $line = __LINE__ + 1;
    is( exception { $future->get }, "Something broke at $file line $line\n", '$future->get throws exception' );
 
-   is( $failure, "Something broke at $file line $line\n", 'Exception passed to on_fail' );
+   is( $failure, "Something broke", 'Exception passed to on_fail' );
 }
 
 # fail_cb
@@ -127,21 +127,19 @@ use Future;
    my $fail_cb = $future->fail_cb;
    is( ref $fail_cb, "CODE", '->fail_cb returns CODE reference' );
 
-   $fail_cb->( "Failure by cb\n" );
-   is( $failure, "Failure by cb\n", 'Failure via ->fail_cb' );
+   $fail_cb->( "Failure by cb" );
+   is( $failure, "Failure by cb", 'Failure via ->fail_cb' );
 }
 
 {
    my $future = Future->new;
 
-   my $file = __FILE__;
-   my $line = __LINE__+1;
    $future->fail( "Something broke", further => "details" );
 
    ok( $future->is_ready, '$future->fail marks future ready' );
 
-   is( scalar $future->failure, "Something broke at $file line $line\n", '$future->failure yields exception' );
-   is_deeply( [ $future->failure ], [ "Something broke at $file line $line\n", "further", "details" ],
+   is( scalar $future->failure, "Something broke", '$future->failure yields exception' );
+   is_deeply( [ $future->failure ], [ "Something broke", "further", "details" ],
          '$future->failure yields details in list context' );
 }
 
@@ -160,21 +158,21 @@ use Future;
    my $failure_2;
    $f2->on_fail( sub { ( $failure_2 ) = @_ } );
 
-   $future->fail( "Chained failure\n" );
+   $future->fail( "Chained failure" );
 
-   is( $failure_1, "Chained failure\n", 'Failure chained via ->on_fail( $f )' );
-   is( $failure_2, "Chained failure\n", 'Failure chained via ->on_ready( $f )' );
+   is( $failure_1, "Chained failure", 'Failure chained via ->on_fail( $f )' );
+   is( $failure_2, "Chained failure", 'Failure chained via ->on_ready( $f )' );
 }
 
 # immediately failed
 {
    my $future = Future->new;
-   $future->fail( "Already broken\n" );
+   $future->fail( "Already broken" );
 
    my $failure;
    $future->on_fail( sub { ( $failure ) = @_; } );
 
-   is( $failure, "Already broken\n", 'Exception passed to on_fail for already-failed future' );
+   is( $failure, "Already broken", 'Exception passed to on_fail for already-failed future' );
 
    my $f1 = Future->new;
    my $f2 = Future->new;
@@ -183,9 +181,29 @@ use Future;
    $future->on_ready( $f2 );
 
    ok( $f1->is_ready, 'Chained ->on_done for immediate future' );
-   is_deeply( [ $f1->failure ], [ "Already broken\n" ], 'Results from chained via ->on_done for immediate future' );
+   is_deeply( [ $f1->failure ], [ "Already broken" ], 'Results from chained via ->on_done for immediate future' );
    ok( $f2->is_ready, 'Chained ->on_ready for immediate future' );
-   is_deeply( [ $f2->failure ], [ "Already broken\n" ], 'Results from chained via ->on_ready for immediate future' );
+   is_deeply( [ $f2->failure ], [ "Already broken" ], 'Results from chained via ->on_ready for immediate future' );
+}
+
+# die
+{
+   my $future = Future->new;
+
+   $future->on_done( sub { die "on_done called for failed future" } );
+   my $failure;
+   $future->on_fail( sub { ( $failure ) = @_; } );
+
+   my $file = __FILE__;
+   my $line = __LINE__+1;
+   identical( $future->die( "Something broke" ), $future, '->die returns $future' );
+
+   ok( $future->is_ready, '$future->die marks future ready' );
+
+   is( scalar $future->failure, "Something broke at $file line $line\n", '$future->failure yields exception' );
+   is( exception { $future->get }, "Something broke at $file line $line\n", '$future->get throws exception' );
+
+   is( $failure, "Something broke at $file line $line\n", 'Exception passed to on_fail' );
 }
 
 # cancel

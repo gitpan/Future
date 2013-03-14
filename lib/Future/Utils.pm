@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 use Exporter 'import';
 
@@ -59,10 +59,11 @@ C<Future::Utils> - utility functions for working with C<Future> objects
 =head1 REPEATING A BLOCK OF CODE
 
 The C<repeat> function provides a way to repeatedly call a block of code that
-returns a C<Future> (called here a "trial future") until some ending condition
+returns a L<Future> (called here a "trial future") until some ending condition
 is satisfied. The C<repeat> function itself returns a C<Future> to represent
 running the repeating loop until that end condition (called here the "eventual
-future").
+future"). The first time the code block is called, it is passed no arguments,
+and each subsequent invocation is passed the previous trial future.
 
 The result of the eventual future is the result of the last trial future.
 
@@ -79,7 +80,7 @@ Repeatedly calls the C<CODE> block while the C<while> condition returns a true
 value. Each time the trial future completes, the C<while> condition is passed
 the trial future.
 
- $trial_f = $code->()
+ $trial_f = $code->( $previous_trial_f )
  $again = $while->( $trial_f )
 
 =head2 $future = repeat { CODE } until => CODE
@@ -88,16 +89,17 @@ Repeatedly calls the C<CODE> block until the C<until> condition returns a true
 value. Each time the trial future completes, the C<until> condition is passed
 the trial future.
 
- $trial_f = $code->()
+ $trial_f = $code->( $previous_trial_f )
  $accept = $while->( $trial_f )
 
 =head2 $future = repeat { CODE } foreach => ARRAY
 
-Calls the C<CODE> block once for each value obtained from the array. The
+Calls the C<CODE> block once for each value obtained from the array, passing
+in the value as the first argument (before the previous trial future). The
 result of the eventual future will be the result from the final trial. The
 referenced array may be modified by this operation.
 
- $trial_f = $code->( $item )
+ $trial_f = $code->( $item, $previous_trial_f )
 
 =head2 $future = repeat { CODE } foreach => ARRAY, while => CODE
 
