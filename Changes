@@ -1,5 +1,9 @@
 Revision history for Future
 
+0.10    BUGFIXES:
+         * Account for newer Carp version in unit tests, which appends
+           trailing period to messages
+
 0.09    CHANGES:
          * Split ->fail method into new ->die call, only append caller
            file/line to the exception in the latter

@@ -63,7 +63,7 @@ use Future;
    is( $future->failure, "It fails", '$future->failure yields exception' );
    my $file = __FILE__;
    my $line = __LINE__ + 1;
-   is( exception { $future->get }, "It fails at $file line $line\n", '$future->get throws exception' );
+   like( exception { $future->get }, qr/^It fails at \Q$file line $line\E\.?\n$/, '$future->get throws exception' );
 
    is( $c2, 1, 'Unfinished child future cancelled on failure' );
 

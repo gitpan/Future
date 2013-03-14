@@ -112,7 +112,7 @@ use Future;
    is( scalar $future->failure, "Something broke", '$future->failure yields exception' );
    my $file = __FILE__;
    my $line = __LINE__ + 1;
-   is( exception { $future->get }, "Something broke at $file line $line\n", '$future->get throws exception' );
+   like( exception { $future->get }, qr/^Something broke at \Q$file line $line\E\.?\n$/, '$future->get throws exception' );
 
    is( $failure, "Something broke", 'Exception passed to on_fail' );
 }
