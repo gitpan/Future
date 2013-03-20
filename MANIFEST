@@ -4,6 +4,7 @@ examples/anyevent.pl
 examples/io-async.pl
 examples/poe.pl
 lib/Future.pm
+lib/Future/Phrasebook.pod
 lib/Future/Utils.pm
 LICENSE
 Makefile.PL

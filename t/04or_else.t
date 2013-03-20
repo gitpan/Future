@@ -76,6 +76,20 @@ use Future;
    is( scalar $fseq->failure, "Another failure\n", '$fseq fails when $f2 fails' );
 }
 
+# code dies
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->or_else( sub {
+      die "It fails\n";
+   } );
+
+   ok( !defined exception { $f1->fail("bork") }, 'exception not propagated from code call' );
+
+   ok( $fseq->is_ready, '$fseq is ready after code exception' );
+   is( scalar $fseq->failure, "It fails\n", '$fseq->failure after code exception' );
+}
+
 # Cancellation
 {
    my $f1 = Future->new;
@@ -118,14 +132,30 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->fail("Failure\n");
+   my $f1 = Future->new->done("Result");
 
    my $called = 0;
    my $fseq = $f1->or_else(
       sub { $called++; return $_[0] }
    );
 
-   is( $called, 1, 'or_else block invoked immediately for already-failed' );
+   is( $called, 0, 'or_else block not invoked for already-done' );
+   ok( $fseq->is_ready, '$fseq already ready for already-done' );
+}
+
+{
+   my $f1 = Future->new->fail("Failure\n");
+
+   my $f2;
+   my $fseq = $f1->or_else(
+      sub { return $f2 = Future->new }
+   );
+
+   ok( defined $f2, '$f2 defined for already-failed' );
+
+   $f2->fail("Another failure\n");
+   ok( $fseq->is_ready, '$fseq already ready for already-failed' );
+   is( scalar $fseq->failure, "Another failure\n", '$fseq->get for already-failed' );
 }
 
 done_testing;

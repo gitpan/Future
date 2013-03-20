@@ -37,5 +37,5 @@ like( warnings {
       $LINE = __LINE__; my $f = Future->new;
       undef $f;
    },
-   qr/^Future=\S+ was constructed at $0 line $LINE and was lost near $0 line $LOSTLINE before it was ready\.$/,
+   qr/^Future=\S+ was constructed at \Q$0\E line $LINE and was lost near \Q$0\E line $LOSTLINE before it was ready\.$/,
    'Lost Future raises a warning' );

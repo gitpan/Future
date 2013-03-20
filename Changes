@@ -1,5 +1,11 @@
 Revision history for Future
 
+0.11    CHANGES:
+         * Added Future::Phrasebook documentation file
+         * Ensure that exceptions thrown from ->followed_by code block are
+           caught and turned into failed Futures
+         * Fix filename regexp matches for unit-tests so they work on Windows
+
 0.10    BUGFIXES:
          * Account for newer Carp version in unit tests, which appends
            trailing period to messages

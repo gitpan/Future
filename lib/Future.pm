@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken );
@@ -184,6 +184,10 @@ If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
 cancelled. If it is cancelled after completion then C<$f2> is cancelled
 instead.
 
+If the C<$code> block dies entirely and throws an exception, this will be
+caught and set as the failure for the returned C<$fseq>. The exception will
+not be propagated to the caller of the method that caused C<$f1> to be ready.
+
 =cut
 
 sub followed_by
@@ -200,7 +204,10 @@ sub followed_by
 
       return if $self->is_cancelled;
 
-      $f2 = $code->( $self );
+      unless( eval { $f2 = $code->( $self ); 1 } ) {
+         $fseq->fail( $@ );
+         return;
+      }
 
       $f2->on_ready( sub {
          my $f2 = shift;
@@ -786,8 +793,8 @@ sub _new_dependent
 =head2 $future = Future->wait_all( @subfutures )
 
 Returns a new C<Future> instance that will indicate it is ready once all of
-the sub future objects given to it indicate that they are ready. Its result
-will a list of its component futures.
+the sub future objects given to it indicate that they are ready, either by
+success or failure. Its result will a list of its component futures.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -823,10 +830,10 @@ sub wait_all
 =head2 $future = Future->wait_any( @subfutures )
 
 Returns a new C<Future> instance that will indicate it is ready once any of
-the sub future objects given to it indicate that they are ready. Any remaining
-component futures that are not yet ready will be cancelled. Its result will be
-the result of the first component future that was ready; either success or
-failure.
+the sub future objects given to it indicate that they are ready, either by
+success or failure. Any remaining component futures that are not yet ready
+will be cancelled. Its result will be the result of the first component future
+that was ready; either success or failure.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -876,8 +883,6 @@ If successful, its result will be a concatenated list of the results of all
 its component futures, in corresponding order. If it fails, its failure will
 be that of the first component future that failed. To access each component
 future's results individually, use C<done_futures>.
-
-(B<NOTE>: this result is different from versions of C<Future> before 0.03.)
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -929,8 +934,6 @@ not yet ready will be cancelled.
 If successful, its result will be that of the first component future that
 succeeded. If it fails, its failure will be that of the last component future
 to fail. To access the other failures, use C<failed_futures>.
-
-(B<NOTE>: this result is different from versions of C<Future> before 0.03.)
 
 Normally when this Future completes successfully, only one of its component
 futures will be done. If it is constructed with multiple that are already done
@@ -1039,6 +1042,9 @@ sub cancelled_futures
 The following examples all demonstrate possible uses of a C<Future>
 object to provide a fictional asynchronous API function called simply
 C<koperation>.
+
+For more examples, comparing the use of C<Future> with regular call/return
+style Perl code, see also L<Future::Phrasebook>.
 
 =head2 Providing Results
 
@@ -1163,55 +1169,6 @@ returned by the final function, if none of them failed. If any of them fails
 it will fail with the same failure. This can be considered similar to normal
 exception handling in synchronous code; the first time a function call throws
 an exception, the subsequent calls are not made.
-
-=head2 Catching Errors
-
-The C<or_else> method can be used to create error handling logic, similar to
-the kind that can be performed synchronously with C<eval> or L<Try::Tiny>.
-
- my $f = try_this()
-            ->or_else( sub {
-               return handle_failure();
-            });
-
-The result of the returned future will be what the first function's future
-returned, if it was successful, or else whatever the second function's future
-returned.
-
-As the failure-handling code block is given the failed future, and has to
-return a future; it can return the failed future itself to apply some clean-up
-logic similar to catching but re-throwing an exception:
-
- my $f = try_this()
-            ->or_else( sub {
-               my $failure = shift;
-               cleanup();
-               return $failure;
-            });
-
-The C<followed_by> method can attach a code block that is run whenever a
-future is ready, regardless of whether it succeeded or failed. This can be
-used to create an additional C<finally>-like block. If the C<followed_by>
-block returns the future it was passed, then the entire combination still
-succeeds or fails according to the result of the first.
-
- my $f = try_this()
-            ->followed_by( sub {
-               finally_this()
-               return $_[0];
-            });
-
-A combination of C<or_else> and C<followed_by> can create a structure similar
-to the full C<try>/C<catch>/C<finally> semantics.
-
- my $f = try_this()
-            ->or_else( sub {
-               return catch_this();
-            })
-            ->followed_by( sub {
-               finally_this();
-               return $_[0];
-            });
 
 =head2 Merging Control Flow
 

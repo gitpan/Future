@@ -33,6 +33,19 @@ use Future;
    is_deeply( [ $future->failure ], [ "failure\n" => "something failed\n" ], '->transform failure' );
 }
 
+# code dies
+{
+   my $f1 = Future->new;
+
+   my $future = $f1->transform(
+      done => sub { die "It fails\n" },
+   );
+
+   $f1->done;
+
+   is_deeply( [ $future->failure ], [ "It fails\n" ], '->transform catches exceptions' );
+}
+
 # Cancellation
 {
    my $f1 = Future->new;

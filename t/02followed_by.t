@@ -66,6 +66,20 @@ use Future;
    is_oneref( $fseq, '$fseq has refcount 1 before EOF' );
 }
 
+# code dies
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->followed_by( sub {
+      die "It fails\n";
+   } );
+
+   ok( !defined exception { $f1->done }, 'exception not propagated from code call' );
+
+   ok( $fseq->is_ready, '$fseq is ready after code exception' );
+   is( scalar $fseq->failure, "It fails\n", '$fseq->failure after code exception' );
+}
+
 # Cancellation
 {
    my $f1 = Future->new;

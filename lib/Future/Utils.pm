@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use Exporter 'import';
 
@@ -90,7 +90,7 @@ value. Each time the trial future completes, the C<until> condition is passed
 the trial future.
 
  $trial_f = $code->( $previous_trial_f )
- $accept = $while->( $trial_f )
+ $accept = $until->( $trial_f )
 
 =head2 $future = repeat { CODE } foreach => ARRAY
 
@@ -131,13 +131,13 @@ sub _repeat_while
 
 sub _repeat_until
 {
-   my ( $code, $future, $running, $while ) = @_;
+   my ( $code, $future, $running, $until ) = @_;
    $$running->on_ready( sub {
       my $self = shift;
-      my $accept = $while->( $self );
+      my $accept = $until->( $self );
       if( !$accept ) {
          $$running = $code->( $self );
-         _repeat_until( $code, $future, $running, $while );
+         _repeat_until( $code, $future, $running, $until );
       }
       else {
          # Propagate result

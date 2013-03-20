@@ -72,6 +72,20 @@ use Future;
    is( scalar $fseq->failure, "Another failure\n", '$fseq fails when $f2 fails' );
 }
 
+# code dies
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->and_then( sub {
+      die "It fails\n";
+   } );
+
+   ok( !defined exception { $f1->done }, 'exception not propagated from code call' );
+
+   ok( $fseq->is_ready, '$fseq is ready after code exception' );
+   is( scalar $fseq->failure, "It fails\n", '$fseq->failure after code exception' );
+}
+
 # Cancellation
 {
    my $f1 = Future->new;
@@ -112,6 +126,21 @@ use Future;
 }
 
 # immediately done
+{
+   my $f1 = Future->new->done("Result");
+
+   my $f2;
+   my $fseq = $f1->and_then(
+      sub { return $f2 = Future->new }
+   );
+
+   ok( defined $f2, '$f2 defined for already-done' );
+
+   $f2->done("Final");
+   ok( $fseq->is_ready, '$fseq already ready for already-done' );
+   is( scalar $fseq->get, "Final", '$fseq->get for already-done' );
+}
+
 {
    my $f1 = Future->new->fail("Failure\n");
 
