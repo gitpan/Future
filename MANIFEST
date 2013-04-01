@@ -14,10 +14,11 @@ META.yml
 README
 t/00use.t
 t/01future.t
-t/02followed_by.t
-t/03and_then.t
-t/04or_else.t
-t/05transform.t
+t/02cancel.t
+t/03followed_by.t
+t/04and_then.t
+t/05or_else.t
+t/06transform.t
 t/10wait_all.t
 t/11wait_any.t
 t/12needs_all.t

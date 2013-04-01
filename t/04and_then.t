@@ -7,6 +7,7 @@ use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
+use Test::Warn;
 
 use Future;
 
@@ -151,6 +152,29 @@ use Future;
 
    is( $called, 0, 'and_then block not invoked for already-failed' );
    ok( $fseq->is_ready, '$fseq already ready for already-failed' );
+}
+
+# Void context raises a warning
+{
+   warnings_are {
+      Future->new->done->and_then(
+         sub { Future->new }
+      );
+   } "Calling ->and_then in void context",
+      'Warning in void context';
+}
+
+# Non-Future return raises exception
+{
+   my $f1 = Future->new;
+
+   my $file = __FILE__;
+   my $line = __LINE__+1;
+   my $fseq = $f1->and_then( sub {} );
+
+   like( exception { $f1->done },
+       qr/^Expected code to return a Future in and_then at \Q$file\E line $line\.?/,
+       'Exception from non-Future return' );
 }
 
 done_testing;

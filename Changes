@@ -1,5 +1,16 @@
 Revision history for Future
 
+0.12    CHANGES:
+         * Take a 'return' argument to Future::Utils::repeat; deprecate the
+           trial-cloning feature for subclasses
+         * Have ->followed_by/etc... print a warning in void context
+         * Throw an exception when ->followed_by/etc.. code does not yield a
+           Future (RT84188)
+         * Ensure that ->needs_all/->needs_any work correctly on a mix of
+           immediate and pending Futures (RT84187)
+         * Ensure that ->on_done/->on_fail always return invocant (RT84313)
+         * Ensure that ->on_ready($f) works on cancelled Futures (RT84312)
+
 0.11    CHANGES:
          * Added Future::Phrasebook documentation file
          * Ensure that exceptions thrown from ->followed_by code block are

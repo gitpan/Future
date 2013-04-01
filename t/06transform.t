@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Test::More;
+use Test::Warn;
 
 use Future;
 
@@ -57,6 +58,15 @@ use Future;
 
    $future->cancel;
    is( $cancelled, 1, '->transform cancel' );
+}
+
+# Void context raises a warning
+{
+   warnings_are {
+      Future->new->done->transform(
+         done => sub { }
+      );
+   } "Calling ->transform in void context";
 }
 
 done_testing;

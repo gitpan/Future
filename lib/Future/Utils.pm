@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 use Exporter 'import';
 
@@ -70,9 +70,12 @@ The result of the eventual future is the result of the last trial future.
 If the eventual future is cancelled, the latest trial future will be
 cancelled.
 
-The eventual future is obtained by calling the C<new> clone constructor on the
-first trial future returned by calling the code block the first time, allowing
-it to correctly respect subclassing.
+If some specific subclass or instance of C<Future> is required as the return
+value, it can be passed as the C<return> argument. Otherwise, for backward
+compatibility, the return C<Future> will be constructed by cloning the first
+trial C<Future>. Because this design has been found to be poor, this will be
+removed in a later version. If the trial C<Future> is of some other subclass,
+a warning will be printed about this impending change of behaviour.
 
 =head2 $future = repeat { CODE } while => CODE
 
@@ -177,8 +180,19 @@ sub repeat(&@)
       }
    }
 
-   my $running = $code->();
-   my $future = $running->new;
+   my $future;
+   my $running;
+   if( $args{return} ) {
+      $future = $args{return};
+      $running = $code->();
+   }
+   else {
+      $running = $code->();
+      $future = $running->new;
+      if( ref $future ne "Future" ) {
+         carp "Using a subclassed Trial Future for cloning is deprecated; use the 'return' argument instead"
+      }
+   }
 
    $args{while} and _repeat_while( $code, $future, \$running, $args{while} );
    $args{until} and _repeat_until( $code, $future, \$running, $args{until} );

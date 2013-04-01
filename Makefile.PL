@@ -8,7 +8,8 @@ WriteMakefile
                    'Test::Fatal' => 0,
                    'Test::Identity' => 0,
                    'Test::More' => '0.88',
-                   'Test::Refcount' => 0
+                   'Test::Refcount' => 0,
+                   'Test::Warn' => 0
                  },
   'INSTALLDIRS' => 'site',
   'EXE_FILES' => [],

@@ -132,6 +132,10 @@ CONSTRUCTORS
     will not be propagated to the caller of the method that caused `$f1' to
     be ready.
 
+    As it is always a mistake to call this method in void context and lose
+    the reference to the returned `Future' (because exception/error handling
+    would be silently dropped), this method warns in void context.
+
   $future = $f1->and_then( \&code )
     A convenient shortcut to `followed_by', which invokes the supplied code
     reference only if the first future completes successfully. If it fails,
@@ -253,8 +257,8 @@ USER METHODS
 
   $future->on_ready( $f )
     If passed another `Future' instance, the passed instance will have its
-    `done' or `fail' methods invoked when the original future completes
-    successfully or fails respectively.
+    `done', `fail' or `cancel' methods invoked when the original future
+    completes successfully, fails, or is cancelled respectively.
 
   @result = $future->get
   $result = $future->get

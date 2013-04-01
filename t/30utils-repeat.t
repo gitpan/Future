@@ -40,6 +40,16 @@ use Future::Utils qw( repeat repeat_until_success );
    is( scalar $future->get, "two", '$future->get' );
 }
 
+# return keyword
+{
+   my $trial_f;
+   my $future = repeat {
+      return $trial_f = Future->new
+   } while => sub { 1 }, return => my $ret = Future->new;
+
+   identical( $future, $ret, 'repeat with return yields correct instance' );
+}
+
 {
    my @running; my $i = 0;
    my $future = repeat {

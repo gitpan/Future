@@ -7,6 +7,7 @@ use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
+use Test::Warn;
 
 use Future;
 
@@ -156,6 +157,29 @@ use Future;
    $f2->fail("Another failure\n");
    ok( $fseq->is_ready, '$fseq already ready for already-failed' );
    is( scalar $fseq->failure, "Another failure\n", '$fseq->get for already-failed' );
+}
+
+# Void context raises a warning
+{
+   warnings_are {
+      Future->new->done->or_else(
+         sub { Future->new }
+      );
+   } "Calling ->or_else in void context",
+      'Warning in void context';
+}
+
+# Non-Future return raises exception
+{
+   my $f1 = Future->new;
+
+   my $file = __FILE__;
+   my $line = __LINE__+1;
+   my $fseq = $f1->or_else( sub {} );
+
+   like( exception { $f1->fail(1) },
+       qr/^Expected code to return a Future in or_else at \Q$file\E line $line\.?/,
+       'Exception from non-Future return' );
 }
 
 done_testing;

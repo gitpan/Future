@@ -8,10 +8,10 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 use Carp qw(); # don't import croak
-use Scalar::Util qw( weaken );
+use Scalar::Util qw( weaken blessed );
 
 use constant DEBUG => $ENV{PERL_FUTURE_DEBUG};
 
@@ -188,12 +188,21 @@ If the C<$code> block dies entirely and throws an exception, this will be
 caught and set as the failure for the returned C<$fseq>. The exception will
 not be propagated to the caller of the method that caused C<$f1> to be ready.
 
+As it is always a mistake to call this method in void context and lose the
+reference to the returned C<Future> (because exception/error handling would be
+silently dropped), this method warns in void context.
+
 =cut
 
 sub followed_by
 {
    my $f1 = shift;
    my ( $code ) = @_;
+
+   # For later, we might want to know where we were called from
+   my $func = "followed_by";
+   $func = (caller 1)[3] and $func =~ s/^.*::// if caller eq __PACKAGE__;
+   my $where = Carp::shortmess "in $func";
 
    my $fseq = $f1->new;
 
@@ -207,6 +216,10 @@ sub followed_by
       unless( eval { $f2 = $code->( $self ); 1 } ) {
          $fseq->fail( $@ );
          return;
+      }
+
+      unless( blessed $f2 and $f2->isa( "Future" ) ) {
+         die "Expected code to return a Future $where";
       }
 
       $f2->on_ready( sub {
@@ -226,6 +239,10 @@ sub followed_by
    $fseq->on_cancel( sub {
       ( $f2 || $f1 )->cancel
    } ) if not $fseq->is_ready;
+
+   if( !defined wantarray ) {
+      Carp::carp "Calling ->$func in void context";
+   }
 
    return $fseq;
 }
@@ -324,23 +341,24 @@ sub _mark_ready
    my $self = shift;
    $self->{ready} = 1;
 
-   my $failed = defined $self->failure;
-   my $done   = !$failed && !$self->is_cancelled;
+   my $fail = defined $self->failure;
+   my $done = !$fail && !$self->is_cancelled;
 
    foreach my $cb ( @{ $self->{callbacks} } ) {
       my ( $type, $code ) = @$cb;
-      my $is_future = eval { $code->isa( "Future" ) };
+      my $is_future = blessed $code and $code->isa( "Future" );
 
       if( $type eq "ready" ) {
-         $is_future ? ( $done ? $code->done( $self->get )
-                              : $code->fail( $self->failure ) )
+         $is_future ? ( $done ? $code->done( $self->get ) :
+                        $fail ? $code->fail( $self->failure ) :
+                                $code->cancel )
                     : $code->( $self );
       }
       elsif( $type eq "done" and $done ) {
          $is_future ? $code->done( $self->get ) 
                     : $code->( $self->get );
       }
-      elsif( $type eq "failed" and $failed ) {
+      elsif( $type eq "failed" and $fail ) {
          $is_future ? $code->fail( $self->failure )
                     : $code->( $self->failure );
       }
@@ -539,8 +557,8 @@ Returns the C<$future>.
 =head2 $future->on_ready( $f )
 
 If passed another C<Future> instance, the passed instance will have its
-C<done> or C<fail> methods invoked when the original future completes
-successfully or fails respectively.
+C<done>, C<fail> or C<cancel> methods invoked when the original future
+completes successfully, fails, or is cancelled respectively.
 
 =cut
 
@@ -550,11 +568,14 @@ sub on_ready
    my ( $code ) = @_;
 
    if( $self->is_ready ) {
-      my $is_future = eval { $code->isa( "Future" ) };
-      my $done = !$self->failure && !$self->is_cancelled;
+      my $is_future = blessed $code and $code->isa( "Future" );
 
-      $is_future ? ( $done ? $code->done( $self->get )
-                           : $code->fail( $self->failure ) )
+      my $fail = defined $self->failure;
+      my $done = !$fail && !$self->is_cancelled;
+
+      $is_future ? ( $done ? $code->done( $self->get ) :
+                     $fail ? $code->fail( $self->failure ) :
+                             $code->cancel )
                  : $code->( $self );
    }
    else {
@@ -625,9 +646,9 @@ sub on_done
    my ( $code ) = @_;
 
    if( $self->is_ready ) {
-      return if $self->failure or $self->is_cancelled;
+      return $self if $self->failure or $self->is_cancelled;
 
-      my $is_future = eval { $code->isa( "Future" ) };
+      my $is_future = blessed $code and $code->isa( "Future" );
       $is_future ? $code->done( $self->get ) 
                  : $code->( $self->get );
    }
@@ -703,9 +724,9 @@ sub on_fail
    my ( $code ) = @_;
 
    if( $self->is_ready ) {
-      return if not $self->failure;
+      return $self if not $self->failure;
 
-      my $is_future = eval { $code->isa( "Future" ) };
+      my $is_future = blessed $code and $code->isa( "Future" );
       $is_future ? $code->fail( $self->failure )
                  : $code->( $self->failure );
    }
@@ -736,7 +757,7 @@ sub cancel
 
    $self->{cancelled}++;
    foreach my $cb ( reverse @{ $self->{on_cancel} || [] } ) {
-      my $is_future = eval { $cb->isa( "Future" ) };
+      my $is_future = blessed $cb and $cb->isa( "Future" );
       $is_future ? $cb->cancel
                  : $cb->( $self );
    }
@@ -777,7 +798,9 @@ sub _new_dependent
    my ( $subs ) = @_;
    my $self = $subs->[0]->new;
 
-   eval { $_->isa( "Future" ) } or Carp::croak "Expected a Future, got $_" for @$subs;
+   foreach my $sub ( @$subs ) {
+      blessed $sub and $sub->isa( "Future" ) or Carp::croak "Expected a Future, got $_";
+   }
 
    $self->{subs} = $subs;
 
@@ -807,6 +830,18 @@ sub wait_all
 
    my $self = Future->_new_dependent( \@subs );
 
+   # Look for immediate ready
+   my $immediate_ready = 1;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready or $immediate_ready = 0, last;
+   }
+
+   if( $immediate_ready ) {
+      $self->{result} = [ @subs ];
+      $self->_mark_ready;
+      return $self;
+   }
+
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
       return if $_[0]->is_cancelled;
@@ -821,7 +856,7 @@ sub wait_all
    };
 
    foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
+      $sub->is_ready or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;
@@ -846,6 +881,27 @@ sub wait_any
 
    my $self = Future->_new_dependent( \@subs );
 
+   # Look for immediate ready
+   my $immediate_ready;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready and $immediate_ready = $sub, last;
+   }
+
+   if( $immediate_ready ) {
+      foreach my $sub ( @subs ) {
+         $sub->is_ready or $sub->cancel;
+      }
+
+      if( $immediate_ready->failure ) {
+         $self->{failure} = [ $immediate_ready->failure ];
+      }
+      else {
+         $self->{result} = [ $immediate_ready->get ];
+      }
+      $self->_mark_ready;
+      return $self;
+   }
+
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
       return if $_[0]->is_cancelled;
@@ -865,6 +921,7 @@ sub wait_any
    };
 
    foreach my $sub ( @subs ) {
+      # No need to test $sub->is_ready since we know none of them are
       $sub->on_ready( $sub_on_ready );
    }
 
@@ -895,6 +952,34 @@ sub needs_all
 
    my $self = Future->_new_dependent( \@subs );
 
+   # Look for immediate fail
+   my $immediate_fail;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready and $sub->failure and $immediate_fail = $sub, last;
+   }
+
+   if( $immediate_fail ) {
+      foreach my $sub ( @subs ) {
+         $sub->is_ready or $sub->cancel;
+      }
+
+      $self->{failure} = [ $immediate_fail->failure ];
+      $self->_mark_ready;
+      return $self;
+   }
+
+   # Look for immediate done
+   my $immediate_done = 1;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready or $immediate_done = 0, last;
+   }
+
+   if( $immediate_done ) {
+      $self->{result} = [ map { $_->get } @subs ];
+      $self->_mark_ready;
+      return $self;
+   }
+
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
       return if $_[0]->is_cancelled;
@@ -917,7 +1002,7 @@ sub needs_all
    };
 
    foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
+      $sub->is_ready or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;
@@ -951,6 +1036,35 @@ sub needs_any
 
    my $self = Future->_new_dependent( \@subs );
 
+   # Look for immediate done
+   my $immediate_done;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready and !$sub->failure and $immediate_done = $sub, last;
+   }
+
+   if( $immediate_done ) {
+      foreach my $sub ( @subs ) {
+         $sub->is_ready or $sub->cancel;
+      }
+
+      $self->{result} = [ $immediate_done->get ];
+      $self->_mark_ready;
+      return $self;
+   }
+
+   # Look for immediate fail
+   my $immediate_fail = 1;
+   foreach my $sub ( @subs ) {
+      $sub->is_ready or $immediate_fail = 0, last;
+   }
+
+   if( $immediate_fail ) {
+      # For consistency we'll pick the last one for the failure
+      $self->{failure} = [ $subs[-1]->failure ];
+      $self->_mark_ready;
+      return $self;
+   }
+
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
       return if $_[0]->is_cancelled;
@@ -973,7 +1087,7 @@ sub needs_any
    };
 
    foreach my $sub ( @subs ) {
-      $sub->on_ready( $sub_on_ready );
+      $sub->is_ready or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;

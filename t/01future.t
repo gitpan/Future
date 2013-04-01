@@ -82,9 +82,12 @@ use Future;
    $future->done( already => "done" );
 
    my @on_done_args;
-   $future->on_done( sub { @on_done_args = @_; } );
+   identical( $future->on_done( sub { @on_done_args = @_; } ), $future, '->on_done returns future for immediate' );
+   my $on_fail;
+   identical( $future->on_fail( sub { $on_fail++; } ), $future, '->on_fail returns future for immediate' );
 
-   is_deeply( \@on_done_args, [ already => "done" ], 'Results passed to on_done for already-done future' );
+   is_deeply( \@on_done_args, [ already => "done" ], 'Results passed to on_done for immediate future' );
+   ok( !$on_fail, 'on_fail not invoked for immediate future' );
 
    my $f1 = Future->new;
    my $f2 = Future->new;
@@ -169,10 +172,13 @@ use Future;
    my $future = Future->new;
    $future->fail( "Already broken" );
 
+   my $on_done;
+   identical( $future->on_done( sub { $on_done++; } ), $future, '->on_done returns future for immediate' );
    my $failure;
-   $future->on_fail( sub { ( $failure ) = @_; } );
+   identical( $future->on_fail( sub { ( $failure ) = @_; } ), $future, '->on_fail returns future for immediate' );
 
    is( $failure, "Already broken", 'Exception passed to on_fail for already-failed future' );
+   ok( !$on_done, 'on_done not invoked for immediately-failed future' );
 
    my $f1 = Future->new;
    my $f2 = Future->new;
@@ -204,73 +210,6 @@ use Future;
    is( exception { $future->get }, "Something broke at $file line $line\n", '$future->get throws exception' );
 
    is( $failure, "Something broke at $file line $line\n", 'Exception passed to on_fail' );
-}
-
-# cancel
-{
-   my $future = Future->new;
-
-   my $cancelled;
-
-   $future->on_cancel( sub { $cancelled .= "1" } );
-   $future->on_cancel( sub { $cancelled .= "2" } );
-
-   my $ready;
-   $future->on_ready( sub { $ready++ if shift->is_cancelled } );
-
-   $future->on_done( sub { die "on_done called for cancelled future" } );
-   $future->on_fail( sub { die "on_fail called for cancelled future" } );
-
-   $future->cancel;
-
-   ok( $future->is_ready, '$future->cancel marks future ready' );
-
-   ok( $future->is_cancelled, '$future->cancelled now true' );
-   is( $cancelled, "21",      '$future cancel blocks called in reverse order' );
-
-   is( $ready, 1, '$future on_ready still called by cancel' );
-
-   like( exception { $future->get }, qr/cancelled/, '$future->get throws exception by cancel' );
-
-   ok( !exception { $future->cancel }, '$future->cancel a second time is OK' );
-}
-
-# cancel_cb
-{
-   my $future = Future->new;
-
-   my $cancelled;
-   $future->on_cancel( sub { $cancelled++ } );
-
-   my $cancel_cb = $future->cancel_cb;
-   is( ref $cancel_cb, "CODE", '->cancel_cb returns CODE reference' );
-
-   $cancel_cb->();
-   is( $cancelled, 1, 'Cancellation via ->cancel_cb' );
-}
-
-# immediately cancelled
-{
-   my $future = Future->new;
-   $future->cancel;
-
-   my $called = 0;
-   $future->on_ready( sub { $called++ } );
-
-   is( $called, 1, 'on_ready invoked for already-cancelled future' );
-}
-
-# cancel chaining
-{
-   my $f1 = Future->new;
-   my $f2 = Future->new;
-
-   $f1->on_cancel( $f2 );
-   my $cancelled;
-   $f2->on_cancel( sub { $cancelled++ } );
-
-   $f1->cancel;
-   is( $cancelled, 1, 'Chained cancellation' );
 }
 
 done_testing;
