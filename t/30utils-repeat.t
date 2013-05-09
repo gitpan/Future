@@ -50,6 +50,7 @@ use Future::Utils qw( repeat repeat_until_success );
    identical( $future, $ret, 'repeat with return yields correct instance' );
 }
 
+# cancellation
 {
    my @running; my $i = 0;
    my $future = repeat {
@@ -68,6 +69,7 @@ use Future::Utils qw( repeat repeat_until_success );
    ok( !$running[0]->is_cancelled, 'previously running future not cancelled' );
 }
 
+# until
 {
    my $trial_f;
    my $arg;
@@ -91,6 +93,23 @@ use Future::Utils qw( repeat repeat_until_success );
 
    ok( $future->is_ready, '$future is now ready after second attempt ->done' );
    is( scalar $future->get, "four", '$future->get' );
+}
+
+# code dies
+{
+   my $future;
+
+   $future = repeat {
+      die "It failed\n";
+   } while => sub { !shift->failure };
+
+   is( $future->failure, "It failed\n", 'repeat while failure after code exception' );
+
+   $future = repeat {
+      die "It failed\n";
+   } until => sub { shift->failure };
+
+   is( $future->failure, "It failed\n", 'repeat until failure after code exception' );
 }
 
 {

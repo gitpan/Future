@@ -18,7 +18,8 @@ t/02cancel.t
 t/03followed_by.t
 t/04and_then.t
 t/05or_else.t
-t/06transform.t
+t/06then.t
+t/07transform.t
 t/10wait_all.t
 t/11wait_any.t
 t/12needs_all.t
@@ -26,5 +27,6 @@ t/13needs_any.t
 t/20subclass.t
 t/21debug.t
 t/30utils-repeat.t
-t/31utils-repeat-foreach.t
+t/31utils-repeat-generate.t
+t/32utils-repeat-foreach.t
 t/99pod.t

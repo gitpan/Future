@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -289,6 +289,86 @@ sub or_else
    });
 }
 
+=head2 $future = $f1->then( \&done_code )
+
+Returns a new C<Future> instance that allows a sequence of operations to be
+performed similar to C<and_then>, except that the code reference is passed
+the result of C<$f1> rather than C<$f1> itself.
+
+If C<$f1> completes successfully, its result it passed into the C<$done_code>
+function, which should return a new C<Future> whose result will be used to set
+the result of the overall C<$future>. If C<$f1> fails this failure is used to
+set the result of C<$future> directly.
+
+ $f2 = $done_code->( @result )
+
+If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
+cancelled. If it is cancelled after completion then C<$f2> is cancelled
+instead.
+
+This is more convenient than C<and_then> in the likely case that the code
+block does not need the initial future object itself, only the result.
+
+=head2 $future = $f1->else( \&fail_code )
+
+Returns a new C<Future> instance that allows a sequence of operations to be
+performed similar to C<or_else>, except that the code reference is passed the
+failure of C<$f1> rather than C<$1> itself.
+
+If C<$f1> fails, its failure is passed into the C<$fail_code> function, which
+should return a new C<Future> whose result will be used to set the result of
+the overall C<$future>. If C<$f1> completes successful this result is used to
+set the result of C<$future> directly.
+
+ $f2 = $fail_code->( $exception, @details )
+
+If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
+cancelled. If it is cancelled after completion then C<$f2> is cancelled
+instead.
+
+This is more convenient than C<or_else> in the likely case that the code
+block does not need the initial future object itself, only the failure.
+
+=head2 $future = $f1->then( \&done_code, \&fail_code )
+
+The C<then> method can also be passed the C<$fail_code> block as well, giving
+a combination of C<then> and C<else> behaviour.
+
+This operation is designed to be compatible with the semantics of other Future
+systems, such as Javascript's Q or Promises/A libraries.
+
+=cut
+
+sub then
+{
+   my $self = shift;
+   my ( $done_code, $fail_code ) = @_;
+
+   return $self->followed_by( sub {
+      my $self = shift;
+      if( !$self->failure ) {
+         return $self unless $done_code;
+         return $done_code->( $self->get );
+      }
+      else {
+         return $self unless $fail_code;
+         return $fail_code->( $self->failure );
+      }
+   } );
+}
+
+sub else
+{
+   my $self = shift;
+   my ( $fail_code ) = @_;
+
+   return $self->followed_by( sub {
+      my $self = shift;
+      return $self unless $self->failure;
+      return $fail_code->( $self->failure );
+   } );
+}
+
 =head2 $future = $f1->transform( %args )
 
 Returns a new C<Future> instance that wraps the one given as C<$f1>. With no
@@ -328,10 +408,12 @@ sub transform
    return $self->followed_by( sub {
       my $self = shift;
       if( !$self->failure ) {
-         return $self->new->done( $xfrm_done ? $xfrm_done->( $self->get ) : $self->get );
+         return $self unless $xfrm_done;
+         return $self->new->done( $xfrm_done->( $self->get ) );
       }
       else {
-         return $self->new->fail( $xfrm_fail ? $xfrm_fail->( $self->failure ) : $self->failure );
+         return $self unless $xfrm_fail;
+         return $self->new->fail( $xfrm_fail->( $self->failure ) );
       }
    });
 }
@@ -502,8 +584,11 @@ is already complete.
 sub on_cancel
 {
    my $self = shift;
-   $self->is_ready and return;
+   $self->is_ready and return $self;
+
    push @{ $self->{on_cancel} }, @_;
+
+   return $self;
 }
 
 =head2 $cancelled = $future->is_cancelled
@@ -1154,8 +1239,7 @@ sub cancelled_futures
 =head1 EXAMPLES
 
 The following examples all demonstrate possible uses of a C<Future>
-object to provide a fictional asynchronous API function called simply
-C<koperation>.
+object to provide a fictional asynchronous API.
 
 For more examples, comparing the use of C<Future> with regular call/return
 style Perl code, see also L<Future::Phrasebook>.
@@ -1264,17 +1348,22 @@ that is immediately failed.
 
 This could be considered similarly to a C<die> call.
 
+An C<eval{}> block can be used to turn a C<Future>-returning function that
+might throw an exception, into a C<Future> that would indicate this failure.
+
+ my $f = eval { function() } || Future->new->fail( $@ );
+
 =head2 Sequencing
 
-The C<and_then> method can be used to create simple chains of dependent tasks,
+The C<then> method can be used to create simple chains of dependent tasks,
 each one executing and returning a C<Future> when the previous operation
 succeeds.
 
  my $f = do_first()
-            ->and_then( sub {
+            ->then( sub {
                return do_second();
             })
-            ->and_then( sub {
+            ->then( sub {
                return do_third();
             });
 

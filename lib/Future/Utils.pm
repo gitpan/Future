@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 use Exporter 'import';
 
@@ -86,6 +86,10 @@ the trial future.
  $trial_f = $code->( $previous_trial_f )
  $again = $while->( $trial_f )
 
+If the C<$code> block dies entirely and throws an exception, this will be
+caught and considered as an immediately-failed C<Future> with the exception as
+the future's failure. The exception will not be propagated to the caller.
+
 =head2 $future = repeat { CODE } until => CODE
 
 Repeatedly calls the C<CODE> block until the C<until> condition returns a true
@@ -95,52 +99,66 @@ the trial future.
  $trial_f = $code->( $previous_trial_f )
  $accept = $until->( $trial_f )
 
-=head2 $future = repeat { CODE } foreach => ARRAY
+=head2 $future = repeat { CODE } foreach => ARRAY, otherwise => CODE
 
 Calls the C<CODE> block once for each value obtained from the array, passing
-in the value as the first argument (before the previous trial future). The
-result of the eventual future will be the result from the final trial. The
-referenced array may be modified by this operation.
+in the value as the first argument (before the previous trial future). When
+there are no more items left in the array, the C<otherwise> code is invoked
+once and passed the last trial future, if there was one, otherwise C<undef> if
+the list was originally empty. The result of the eventual future will be the
+result of the future returned from C<otherwise>.
+
+The referenced array may be modified by this operation.
 
  $trial_f = $code->( $item, $previous_trial_f )
+ $final_f = $otherwise->( $last_trial_f )
 
-=head2 $future = repeat { CODE } foreach => ARRAY, while => CODE
+The C<otherwise> code is optional; if not supplied then the result of the
+eventual future will simply be that of the last trial.
 
-=head2 $future = repeat { CODE } foreach => ARRAY, until => CODE
+=head2 $future = repeat { CODE } foreach => ARRAY, while => CODE, ...
+
+=head2 $future = repeat { CODE } foreach => ARRAY, until => CODE, ...
 
 Combines the effects of C<foreach> with C<while> or C<until>. Calls the
 C<CODE> block once for each value obtained from the array, until the array is
 exhausted or the given ending condition is satisfied.
 
+If a C<while> or C<until> condition is combined with C<otherwise>, the
+C<otherwise> code will only be run if the array was entirely exhausted. If the
+operation is terminated early due to the C<while> or C<until> condition being
+satisfied, the eventual result will simply be that of the last trial that was
+executed.
+
+=head2 $future = repeat { CODE } generate => CODE, otherwise => CODE
+
+Calls the C<CODE> block once for each value obtained from the generator code,
+passing in the value as the first argument (before the previous trial future).
+When the generator returns an empty list, the C<otherwise> code is invoked and
+passed the last trial future, if there was one, otherwise C<undef> if the
+generator never returned a value. The result of the eventual future will be
+the result of the future returned from C<otherwise>.
+
+ $trial_f = $code->( $item, $previous_trial_f )
+ $final_f = $otherwise->( $last_trial_f )
+
+ ( $item ) = $generate->()
+
+The generator is called in list context but should return only one item per
+call. Subsequent values will be ignored. When it has no more items to return
+it should return an empty list.
+
 =cut
 
-sub _repeat_while
+sub _repeat
 {
-   my ( $code, $future, $running, $while ) = @_;
+   my ( $code, $future, $running, $cond, $sense ) = @_;
    $$running->on_ready( sub {
       my $self = shift;
-      my $again = $while->( $self );
+      my $again = !!$cond->( $self ) ^ $sense;
       if( $again ) {
-         $$running = $code->( $self );
-         _repeat_while( $code, $future, $running, $while );
-      }
-      else {
-         # Propagate result
-         $$running->on_done( $future );
-         $$running->on_fail( $future );
-      }
-   } );
-}
-
-sub _repeat_until
-{
-   my ( $code, $future, $running, $until ) = @_;
-   $$running->on_ready( sub {
-      my $self = shift;
-      my $accept = $until->( $self );
-      if( !$accept ) {
-         $$running = $code->( $self );
-         _repeat_until( $code, $future, $running, $until );
+         $$running = eval { $code->( $self ) } || Future->new->fail( $@ );
+         _repeat( $code, $future, $running, $cond, $sense );
       }
       else {
          # Propagate result
@@ -156,27 +174,58 @@ sub repeat(&@)
    my %args = @_;
 
    # This makes it easier to account for other conditions
-   defined($args{while}) + defined($args{until}) == 1 or defined($args{foreach})
-      or croak "Expected one of 'while', 'until' or 'foreach'";
+   defined($args{while}) + defined($args{until}) == 1 
+      or defined($args{foreach})
+      or defined($args{generate})
+      or croak "Expected one of 'while', 'until', 'foreach' or 'generate'";
 
    if( $args{foreach} ) {
+      $args{generate} and croak "Cannot use both 'foreach' and 'generate'";
+
       my $array = delete $args{foreach};
+      $args{generate} = sub {
+         @$array ? shift @$array : ();
+      };
+   }
+
+   if( $args{generate} ) {
+      my $generator = delete $args{generate};
+      my $otherwise = delete $args{otherwise};
+
+      # TODO: This is slightly messy as this lexical is captured by both
+      #   blocks of code. Can we do better somehow?
+      my $done;
 
       my $orig_code = $code;
-      $code = sub { unshift @_, shift @$array; goto &$orig_code };
+      $code = sub {
+         my ( $last_trial_f ) = @_;
+         my $again = my ( $value ) = $generator->( $last_trial_f );
+
+         if( $again ) {
+            unshift @_, $value; goto &$orig_code;
+         }
+
+         $done++;
+         if( $otherwise ) {
+            goto &$otherwise;
+         }
+         else {
+            return $last_trial_f;
+         }
+      };
 
       if( my $orig_while = delete $args{while} ) {
          $args{while} = sub {
-            $orig_while->( $_[0] ) and scalar @$array;
+            $orig_while->( $_[0] ) and !$done;
          };
       }
       elsif( my $orig_until = delete $args{until} ) {
          $args{while} = sub {
-            !$orig_until->( $_[0] ) and scalar @$array;
+            !$orig_until->( $_[0] ) and !$done;
          };
       }
       else {
-         $args{while} = sub { scalar @$array };
+         $args{while} = sub { !$done };
       }
    }
 
@@ -187,15 +236,15 @@ sub repeat(&@)
       $running = $code->();
    }
    else {
-      $running = $code->();
+      $running = eval { $code->() } || Future->new->fail( $@ );
       $future = $running->new;
       if( ref $future ne "Future" ) {
          carp "Using a subclassed Trial Future for cloning is deprecated; use the 'return' argument instead"
       }
    }
 
-   $args{while} and _repeat_while( $code, $future, \$running, $args{while} );
-   $args{until} and _repeat_until( $code, $future, \$running, $args{until} );
+   $args{while} and _repeat( $code, $future, \$running, $args{while}, 0 );
+   $args{until} and _repeat( $code, $future, \$running, $args{until}, 1 );
 
    $future->on_cancel( sub { $running->cancel } );
 
@@ -205,7 +254,8 @@ sub repeat(&@)
 =head2 $future = repeat_until_success { CODE } ...
 
 A shortcut to calling C<repeat> with an ending condition that simply tests for
-a successful result from a future. May be combined with C<foreach>.
+a successful result from a future. May be combined with C<foreach> or
+C<generate>.
 
 =cut
 

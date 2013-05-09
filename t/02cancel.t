@@ -5,6 +5,7 @@ use warnings;
 
 use Test::More;
 use Test::Fatal;
+use Test::Identity;
 
 use Future;
 
@@ -14,7 +15,7 @@ use Future;
 
    my $cancelled;
 
-   $future->on_cancel( sub { $cancelled .= "1" } );
+   identical( $future->on_cancel( sub { $cancelled .= "1" } ), $future, '->on_cancel returns $future' );
    $future->on_cancel( sub { $cancelled .= "2" } );
 
    my $ready;

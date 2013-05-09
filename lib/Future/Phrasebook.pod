@@ -17,7 +17,7 @@ C<ALL_CAPITALS()> to make them stand out.
 
 In the examples showing use of Futures, any function that is expected to
 return a C<Future> instance is named with a leading C<F_> prefix. Each example
-is also constructed so as to yield and overall future in a variable called
+is also constructed so as to yield an overall future in a variable called
 C<$f>, which represents the entire operation.
 
 =head1 SEQUENCING
@@ -33,15 +33,15 @@ Using a Future it is necessary to await the result of the first C<Future>
 before calling the second.
 
  my $f = F_FIRST()
-    ->and_then( sub { F_SECOND(); } );
+    ->then( sub { F_SECOND(); } );
 
 Here, the anonymous closure is invoked once the C<Future> returned by
-C<F_FIRST()> succeeds. Because C<and_then> invokes the code block only if the
+C<F_FIRST()> succeeds. Because C<then> invokes the code block only if the
 first Future succeeds, it shortcircuits around failures similar to the way that
 C<die()> shortcircuits around thrown exceptions. A C<Future> representing the
 entire combination is returned by the method.
 
-Because the C<and_then> method itself returns a C<Future> representing the
+Because the C<then> method itself returns a C<Future> representing the
 overall operation, it can itself be further chained.
 
  FIRST();
@@ -51,8 +51,8 @@ overall operation, it can itself be further chained.
 Z<>
 
  my $f = F_FIRST()
-    ->and_then( sub { F_SECOND(); } )
-    ->and_then( sub { F_THIRD(); } );
+    ->then( sub { F_SECOND(); } )
+    ->then( sub { F_THIRD(); } );
 
 See below for examples of ways to handle exceptions.
 
@@ -63,14 +63,24 @@ function.
 
  OUTER( INNER() );
 
-To obtain the result of the first C<Future> use the C<get> method on it. It is
-conveniently passed as the only argument into the C<and_then>.
+The result of the first C<Future> is passed into the code block given to the
+C<then> method.
+
+ my $f = F_INNER()
+    ->then( sub { F_OUTER( @_ ) } );
+
+Alternatively, when using the C<and_then> method, the result can be obtained
+by calling the C<get> method on it, as it is passed as the only argument to
+the code block.
 
  my $f = F_INNER()
     ->and_then( sub {
        my $f_inner = shift;
        F_OUTER( $f_inner->get );
     });
+
+This form is usually more convenient in cases where the code block might want
+to simply return the initial future.
 
 =head1 CONDITIONALS
 
@@ -111,22 +121,50 @@ C<eval>.
     ERROR( $e );
  };
 
-The C<or_else> method on a C<Future> can be used here. It behaves similar to
-C<and_then>, but is only invoked if the initial C<Future> fails; not if it
-succeeds. The C<failure> method on the initial C<Future> passed into the code
-block can be used to inspect the exception.
+The C<else> method on a C<Future> can be used here. It behaves similar to
+C<then>, but is only invoked if the initial C<Future> fails; not if it
+succeeds.
 
  my $f = F_FIRST()
-    ->or_else( sub { F_ERROR( shift->failure ); } );
+    ->else( sub { F_ERROR( @_ ); } );
+
+Alternatively, the second argument to the C<then> method can be applied, which
+is invoked only on case of failure.
+
+ my $f = F_FIRST()
+    ->then( undef, sub { F_ERROR( @_ ); } );
 
 Often it may be the case that the failure-handling code is in fact immediate,
-and doesn't return a C<Future>. In that case, the C<or_else> code block can
+and doesn't return a C<Future>. In that case, the C<else> code block can
 return an immediate C<Future> instance.
 
  my $f = F_FIRST()
-    ->or_else( sub {
-       ERROR( shift->failure );
+    ->else( sub {
+       ERROR( @_ );
        return Future->new->done;
+    });
+
+Sometimes the failure handling code simply needs to be aware of the failure,
+but rethrow it further up.
+
+ try {
+    FIRST();
+ }
+ catch {
+    my $e = $_;
+    ERROR( $e );
+    die $e;
+ };
+
+In this case, while the C<else> block could return a new C<Future> failed with
+the same exception, the C<or_else> block is passed the failed C<Future> itself
+so it can just return that.
+
+ my $f = F_FIRST()
+    ->or_else( sub {
+       my $f1 = shift;
+       ERROR( $f1->failure );
+       return $f1;
     });
 
 The C<followed_by> method is similar again, though it invokes the code block
@@ -148,10 +186,9 @@ the operation.
 Z<>
 
  my $f = F_FIRST()
-    ->or_else( sub {
-       my $f_fail = shift;
-       ERROR( $f_fail->failure );
-       return $f_fail;
+    ->else( sub {
+       ERROR( @_ );
+       return Future->new->done;
     })
     ->followed_by( sub {
        CLEANUP();
@@ -274,7 +311,7 @@ concurrency.
 Z<>
 
  my $f = Future->wait_all( FIRST_A(), FIRST_B() )
-    ->and_then( sub { SECOND() } );
+    ->then( sub { SECOND() } );
 
 Unlike in the call/return case, this can perform the work of C<FIRST_A()> and
 C<FIRST_B()> concurrently, only proceeding to C<SECOND()> when both are ready.
@@ -287,8 +324,8 @@ C<Future>s. This can be used to obtain the results.
 Z<>
 
  my $f = Future->wait_all( FIRST_A(), FIRST_B() )
-    ->and_then( sub {
-       my ( $f_a, $f_b ) = shift->get;
+    ->then( sub {
+       my ( $f_a, $f_b ) = @_
        SECOND( $f_a->get, $f_b->get );
     } );
 
@@ -301,7 +338,7 @@ control flow can be written slightly neater using C<< Future->needs_all >>
 instead.
 
  my $f = Future->needs_all( FIRST_A(), FIRST_B() )
-    ->and_then( sub { SECOND( shift->get ) } );
+    ->then( sub { SECOND( @_ ) } );
 
 The C<get> method of a C<needs_all> dependent Future returns a concatenated
 list of the results of all its component Futures, as the only way it will
@@ -320,9 +357,9 @@ Again, the C<needs_all> version allows more convenient access to the list of
 results.
 
  my $f = Future->needs_all( map { F_FUNC( $_ ) } @ITEMS )
-    ->and_then( sub {
-       my @RESULT = shift->get;
-       F_PROCESS( @result )
+    ->then( sub {
+       my @RESULT = @_;
+       F_PROCESS( @RESULT )
     } );
 
 =head1 AUTHOR

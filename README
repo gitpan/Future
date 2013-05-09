@@ -148,6 +148,51 @@ CONSTRUCTORS
     then the returned future will complete with the same result and the code
     reference will not be invoked.
 
+  $future = $f1->then( \&done_code )
+    Returns a new `Future' instance that allows a sequence of operations to
+    be performed similar to `and_then', except that the code reference is
+    passed the result of `$f1' rather than `$f1' itself.
+
+    If `$f1' completes successfully, its result it passed into the
+    `$done_code' function, which should return a new `Future' whose result
+    will be used to set the result of the overall `$future'. If `$f1' fails
+    this failure is used to set the result of `$future' directly.
+
+     $f2 = $done_code->( @result )
+
+    If `$future' is cancelled before `$f1' completes, then `$f1' will be
+    cancelled. If it is cancelled after completion then `$f2' is cancelled
+    instead.
+
+    This is more convenient than `and_then' in the likely case that the code
+    block does not need the initial future object itself, only the result.
+
+  $future = $f1->else( \&fail_code )
+    Returns a new `Future' instance that allows a sequence of operations to
+    be performed similar to `or_else', except that the code reference is
+    passed the failure of `$f1' rather than `$1' itself.
+
+    If `$f1' fails, its failure is passed into the `$fail_code' function,
+    which should return a new `Future' whose result will be used to set the
+    result of the overall `$future'. If `$f1' completes successful this
+    result is used to set the result of `$future' directly.
+
+     $f2 = $fail_code->( $exception, @details )
+
+    If `$future' is cancelled before `$f1' completes, then `$f1' will be
+    cancelled. If it is cancelled after completion then `$f2' is cancelled
+    instead.
+
+    This is more convenient than `or_else' in the likely case that the code
+    block does not need the initial future object itself, only the failure.
+
+  $future = $f1->then( \&done_code, \&fail_code )
+    The `then' method can also be passed the `$fail_code' block as well,
+    giving a combination of `then' and `else' behaviour.
+
+    This operation is designed to be compatible with the semantics of other
+    Future systems, such as Javascript's Q or Promises/A libraries.
+
   $future = $f1->transform( %args )
     Returns a new `Future' instance that wraps the one given as `$f1'. With
     no arguments this will be a trivial wrapper; `$future' will complete or
@@ -426,8 +471,7 @@ METHODS ON DEPENDENT FUTURES
 
 EXAMPLES
     The following examples all demonstrate possible uses of a `Future'
-    object to provide a fictional asynchronous API function called simply
-    `koperation'.
+    object to provide a fictional asynchronous API.
 
     For more examples, comparing the use of `Future' with regular
     call/return style Perl code, see also Future::Phrasebook.
@@ -534,16 +578,22 @@ EXAMPLES
 
     This could be considered similarly to a `die' call.
 
+    An `eval{}' block can be used to turn a `Future'-returning function that
+    might throw an exception, into a `Future' that would indicate this
+    failure.
+
+     my $f = eval { function() } || Future->new->fail( $@ );
+
   Sequencing
-    The `and_then' method can be used to create simple chains of dependent
+    The `then' method can be used to create simple chains of dependent
     tasks, each one executing and returning a `Future' when the previous
     operation succeeds.
 
      my $f = do_first()
-                ->and_then( sub {
+                ->then( sub {
                    return do_second();
                 })
-                ->and_then( sub {
+                ->then( sub {
                    return do_third();
                 });
 

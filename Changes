@@ -1,5 +1,16 @@
 Revision history for Future
 
+0.13    CHANGES:
+         * Added ->then and ->else methods; like ->and_then but code is passed
+           result directly instead of invocant future
+         * Added repeat { ... } foreach, otherwise argument to set final
+           result and also handle empty lists
+         * Added repeat { ... } generate
+         * Turn repeat { ... } code block exceptions into failed futures
+         * Ensure that ->on_cancel returns $self (RT85134)
+         * Documentation / Phrasebook updates to demonstrate newly added
+           features
+
 0.12    CHANGES:
          * Take a 'return' argument to Future::Utils::repeat; deprecate the
            trial-cloning feature for subclasses
