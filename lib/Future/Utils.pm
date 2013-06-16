@@ -8,13 +8,17 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 use Exporter 'import';
 
 our @EXPORT_OK = qw(
    repeat
    repeat_until_success
+
+   fmap fmap_concat
+   fmap1
+   fmap_void
 );
 
 use Carp;
@@ -268,6 +272,200 @@ sub repeat_until_success(&@)
       and croak "Cannot pass 'while' or 'until' to repeat_until_success";
 
    repeat \&$code, while => sub { shift->failure }, %args;
+}
+
+=head1 APPLYING A FUNCTION TO A LIST
+
+The C<fmap> family of functions provide a way to call a block of code that
+returns a L<Future> (called here an "item future") once per item in a given
+list, or returned by a generator function. The C<fmap*> functions themselves
+return a C<Future> to represent the ongoing operation, which completes when
+every item's future has completed.
+
+While this behaviour can also be implemented using C<repeat>, the main reason
+to use an C<fmap> function is that the individual item operations are
+considered as independent, and thus more than one can be outstanding
+concurrently. An argument can be passed to the function to indicate how many
+items to start initially, and thereafter it will keep that many of them
+running concurrently until all of the items are done, or until any of them
+fail. If an individual item future fails, the overall result future will be
+marked as failing with the same failure, and any other pending item futures
+that are outstanding at the time will be cancelled.
+
+The following named arguments are common to each C<fmap*> function:
+
+=over 8
+
+=item foreach => ARRAY
+
+Provides the list of items to iterate over, as an C<ARRAY> reference.
+
+The referenced array may be modified by this operation.
+
+=item generate => CODE
+
+Provides the list of items to iterate over, by calling the generator function
+once for each required item. The function should return a single item, or an
+empty list to indicate it has no more items.
+
+ ( $item ) = $generate->()
+
+=item concurrent => INT
+
+Gives the number of item futures to keep outstanding. By default this value
+will be 1 (i.e. no concurrency); larger values indicate that multiple item
+futures will be started at once.
+
+=item return => Future
+
+Normally, a new instance is returned of the base C<Future> class. By passing
+a new instance as the C<return> keyword, the result will be put into the given
+instance. This can be used to return subclasses, or specific instances.
+
+=back
+
+In each case, the main code block will be called once for each item in the
+list, passing in the item as the only argument:
+
+ $item_f = $code->( $item )
+
+The expected return value from each item's future, and the value returned from
+the result future will differ in each function's case; they are documented
+below.
+
+=cut
+
+sub _fmap_slot
+{
+   my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $future ) = @_;
+
+   if( my ( $item ) = $generator->() ) {
+      my $f = $slots->[$idx] = $code->( $item );
+
+      if( $collect eq "array" ) {
+         push @$results, my $r = [];
+         $f->on_done( sub { @$r = @_; _fmap_slot( @args ); });
+      }
+      elsif( $collect eq "scalar" ) {
+         push @$results, undef;
+         my $r = \$results->[-1];
+         $f->on_done( sub { $$r = $_[0]; _fmap_slot( @args ); });
+      }
+      else {
+         $f->on_done( sub { _fmap_slot( @args ); });
+      }
+
+      $f->on_fail( $future );
+      $future->on_cancel( $f );
+   }
+   else {
+      undef $slots->[$idx];
+      defined and return for @$slots;
+
+      $future->done( @$results );
+   }
+}
+
+sub _fmap
+{
+   my $code = shift;
+   my %args = @_;
+
+   my $concurrent = $args{concurrent} || 1;
+   my @slots = ( undef ) x $concurrent;
+
+   my $results = [];
+   my $future = $args{return} || Future->new;
+
+   my $generator;
+   if( $generator = $args{generate} ) {
+      # OK
+   }
+   elsif( my $array = $args{foreach} ) {
+      $generator = sub { return unless @$array; shift @$array };
+   }
+   else {
+      croak "Expected either 'generate' or 'foreach'";
+   }
+
+   # If any of these immediately fail, don't bother continuing
+   $future->is_ready || _fmap_slot( \@slots, $_, $code, $generator, $args{collect}, $results, $future ) for 0 .. $#slots;
+
+   $future->on_fail( sub {
+      !defined $_ or $_->is_ready or $_->cancel for @slots;
+   });
+
+   return $future;
+}
+
+=head2 $future = fmap { CODE } ...
+
+This version of C<fmap> expects each item future to return a list of zero or
+more values, and the overall result will be the concatenation of all these
+results. It acts like a future-based equivalent to Perl's C<map> operator.
+
+The results are returned in the order of the original input values, not in the
+order their futures complete in. Because of the intermediate storage of
+C<ARRAY> references and final flattening operation used to implement this
+behaviour, this function is slightly less efficient than C<fmap1> or
+C<fmap_void> in cases where item futures are expected only ever to return one,
+or zero values, respectively.
+
+This function is also available under the name C<fmap_concat> to emphasise the
+concatenation behaviour.
+
+=cut
+
+*fmap = \&fmap_concat; # alias
+
+sub fmap_concat(&@)
+{
+   my $code = shift;
+   my %args = @_;
+
+   _fmap( $code, %args, collect => "array" )->then( sub {
+      return Future->new->done( map { @$_ } @_ );
+   });
+}
+
+=head2 $future = fmap1 { CODE } ...
+
+This version of C<fmap> acts more like the C<map> functions found in Scheme or
+Haskell; it expects that each item future returns only one value, and the
+overall result will be a list containing these, in order of the original input
+items. If an item future returns more than one value the others will be
+discarded. If it returns no value, then C<undef> will be substituted in its
+place so that the result list remains in correspondence with the input list.
+
+=cut
+
+sub fmap1(&@)
+{
+   my $code = shift;
+   my %args = @_;
+
+   _fmap( $code, %args, collect => "scalar" )
+}
+
+=head2 $future = fmap_void { CODE } ...
+
+This version of C<fmap> does not collect any results from its item futures, it
+simply waits for them all to complete. Its result future will provide no
+values.
+
+While not a map in the strictest sense, this variant is still useful as a way
+to control concurrency of a function call iterating over a list of items,
+obtaining its results by some other means (such as side-effects on captured
+variables, or some external system).
+
+=cut
+
+sub fmap_void(&@)
+{
+   my $code = shift;
+   my %args = @_;
+
+   _fmap( $code, %args, collect => "void" )
 }
 
 =head1 AUTHOR

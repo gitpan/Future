@@ -29,4 +29,6 @@ t/21debug.t
 t/30utils-repeat.t
 t/31utils-repeat-generate.t
 t/32utils-repeat-foreach.t
+t/33utils-map-void.t
+t/34utils-map.t
 t/99pod.t

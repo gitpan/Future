@@ -114,6 +114,11 @@ CONSTRUCTORS
     This constructor would primarily be used by implementations of
     asynchronous interfaces.
 
+  $future = Future->wrap( @values )
+    If given a single argument which is already a `Future' reference, this
+    will be returned unmodified. Otherwise, returns a new `Future' instance
+    that is already complete, and will yield the given values.
+
   $future = $f1->followed_by( \&code )
     Returns a new `Future' instance that allows a sequence of operations to
     be performed. Once `$f1' is ready, the code reference will be invoked

@@ -1,5 +1,12 @@
 Revision history for Future
 
+0.14    CHANGES:
+         * Added Future->wrap constructor
+         * Added Future::Utils::fmap* family of functions
+
+        BUGFIXES:
+         * Fixed a precedence bug in 'and' vs &&
+
 0.13    CHANGES:
          * Added ->then and ->else methods; like ->and_then but code is passed
            result directly instead of invocant future

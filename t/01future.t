@@ -41,6 +41,26 @@ use Future;
    is_oneref( $future, '$future has refcount 1 at end of test' );
 }
 
+# wrap
+{
+   my $f = Future->new;
+
+   my $future = Future->wrap( $f );
+
+   ok( defined $future, 'Future->wrap(Future) defined' );
+   isa_ok( $future, "Future", 'Future->wrap(Future)' );
+
+   $f->done( "Wrapped Future" );
+   is( scalar $future->get, "Wrapped Future", 'Future->wrap(Future)->get' );
+
+   $future = Future->wrap( "Plain string" );
+
+   ok( defined $future, 'Future->wrap(string) defined' );
+   isa_ok( $future, "Future", 'Future->wrap(string)' );
+
+   is( scalar $future->get, "Plain string", 'Future->wrap(string)->get' );
+}
+
 # done_cb
 {
    my $future = Future->new;

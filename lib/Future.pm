@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -169,6 +169,27 @@ END { $GLOBAL_END = 1; }
    # 'near'.
    warn "$self was constructed at $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
 } if DEBUG;
+
+=head2 $future = Future->wrap( @values )
+
+If given a single argument which is already a C<Future> reference, this will
+be returned unmodified. Otherwise, returns a new C<Future> instance that is
+already complete, and will yield the given values.
+
+=cut
+
+sub wrap
+{
+   my $class = shift;
+   my @values = @_;
+
+   if( @values == 1 and blessed $values[0] and $values[0]->isa( __PACKAGE__ ) ) {
+      return $values[0];
+   }
+   else {
+      return $class->new->done( @values );
+   }
+}
 
 =head2 $future = $f1->followed_by( \&code )
 
@@ -428,7 +449,7 @@ sub _mark_ready
 
    foreach my $cb ( @{ $self->{callbacks} } ) {
       my ( $type, $code ) = @$cb;
-      my $is_future = blessed $code and $code->isa( "Future" );
+      my $is_future = blessed( $code ) && $code->isa( "Future" );
 
       if( $type eq "ready" ) {
          $is_future ? ( $done ? $code->done( $self->get ) :
@@ -653,7 +674,7 @@ sub on_ready
    my ( $code ) = @_;
 
    if( $self->is_ready ) {
-      my $is_future = blessed $code and $code->isa( "Future" );
+      my $is_future = blessed( $code ) && $code->isa( "Future" );
 
       my $fail = defined $self->failure;
       my $done = !$fail && !$self->is_cancelled;
@@ -733,7 +754,7 @@ sub on_done
    if( $self->is_ready ) {
       return $self if $self->failure or $self->is_cancelled;
 
-      my $is_future = blessed $code and $code->isa( "Future" );
+      my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->done( $self->get ) 
                  : $code->( $self->get );
    }
@@ -811,7 +832,7 @@ sub on_fail
    if( $self->is_ready ) {
       return $self if not $self->failure;
 
-      my $is_future = blessed $code and $code->isa( "Future" );
+      my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->fail( $self->failure )
                  : $code->( $self->failure );
    }
@@ -841,10 +862,10 @@ sub cancel
    return if $self->is_ready;
 
    $self->{cancelled}++;
-   foreach my $cb ( reverse @{ $self->{on_cancel} || [] } ) {
-      my $is_future = blessed $cb and $cb->isa( "Future" );
-      $is_future ? $cb->cancel
-                 : $cb->( $self );
+   foreach my $code ( reverse @{ $self->{on_cancel} || [] } ) {
+      my $is_future = blessed( $code ) && $code->isa( "Future" );
+      $is_future ? $code->cancel
+                 : $code->( $self );
    }
    $self->_mark_ready;
 
