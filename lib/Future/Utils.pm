@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.14';
+our $VERSION = '0.15';
 
 use Exporter 'import';
 
@@ -57,6 +57,26 @@ C<Future::Utils> - utility functions for working with C<Future> objects
     ...
     return $trial_f;
  } foreach => \@items;
+
+Z<>
+
+ my $result_f = fmap {
+    my $item = shift;
+    ...
+    return $item_f;
+ } foreach => \@items, concurrent => 4;
+
+ my $result_f = fmap1 {
+    my $item = shift;
+    ...
+    return $item_f;
+ } foreach => \@items, concurrent => 8;
+
+ my $done_f = fmap_void {
+    my $item = shift;
+    ...
+    return $item_f;
+ } foreach => \@items, concurrent => 10;
 
 =cut
 
@@ -161,7 +181,7 @@ sub _repeat
       my $self = shift;
       my $again = !!$cond->( $self ) ^ $sense;
       if( $again ) {
-         $$running = eval { $code->( $self ) } || Future->new->fail( $@ );
+         $$running = Future->call( $code, $self );
          _repeat( $code, $future, $running, $cond, $sense );
       }
       else {
@@ -237,10 +257,10 @@ sub repeat(&@)
    my $running;
    if( $args{return} ) {
       $future = $args{return};
-      $running = $code->();
+      $running = Future->call( $code );
    }
    else {
-      $running = eval { $code->() } || Future->new->fail( $@ );
+      $running = Future->call( $code );
       $future = $running->new;
       if( ref $future ne "Future" ) {
          carp "Using a subclassed Trial Future for cloning is deprecated; use the 'return' argument instead"
@@ -340,7 +360,7 @@ sub _fmap_slot
    my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $future ) = @_;
 
    if( my ( $item ) = $generator->() ) {
-      my $f = $slots->[$idx] = $code->( $item );
+      my $f = $slots->[$idx] = Future->call( $code, $item );
 
       if( $collect eq "array" ) {
          push @$results, my $r = [];

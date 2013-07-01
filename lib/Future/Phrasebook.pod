@@ -362,6 +362,47 @@ results.
        F_PROCESS( @RESULT )
     } );
 
+This form of the code starts every item's future concurrently, then waits for
+all of them. If the list of C<@ITEMS> is potentially large, this may cause a
+problem due to too many items running at once. Instead, the
+C<Future::Utils::fmap> family of functions can be used to bound the
+concurrency, keeping at most some given number of items running, starting new
+ones as existing ones complete.
+
+ my $f = fmap {
+    my $item = shift;
+    F_FUNC( $item )
+ } foreach => \@ITEMS;
+
+By itself, this will not actually act concurrently as it will only keep one
+Future outstanding at a time. The C<concurrent> flag lets it keep a larger
+number "in flight" at any one time:
+
+ my $f = fmap {
+    my $item = shift;
+    F_FUNC( $item )
+ } foreach => \@ITEMS, concurrent => 10;
+
+The C<fmap> and C<fmap1> functions return a Future that will eventually give
+the collected results of the individual item futures, thus making them similar
+to perl's C<map> operator.
+
+Sometimes, no result is required, and the items are run in a loop simply for
+some side-effect of the body.
+
+ foreach my $item ( @ITEMS ) {
+    FUNC( $item );
+ }
+
+To avoid having to collect a potentially-large set of results only to throw
+them away, the C<fmap_void> function variant of the C<fmap> family yields a
+Future that completes with no result after all the items are complete.
+
+ my $f = fmap_void {
+    my $item = shift;
+    F_FIRST( $item )
+ } foreach => \@ITEMS, concurrent => 10;
+
 =head1 AUTHOR
 
 Paul Evans <leonerd@leonerd.org.uk>

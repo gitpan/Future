@@ -112,6 +112,17 @@ use Future::Utils qw( repeat repeat_until_success );
    is( $future->failure, "It failed\n", 'repeat until failure after code exception' );
 }
 
+# Non-Future return fails
+{
+   my $future;
+
+   $future = repeat {
+      "non-Future"
+   } while => sub { !shift->failure };
+
+   is( $future->failure, "Expected code to return a Future", 'repeat failure for non-Future return' );
+}
+
 {
    my $attempt = 0;
    my $future = repeat_until_success {

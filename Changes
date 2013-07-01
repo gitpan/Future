@@ -1,5 +1,12 @@
 Revision history for Future
 
+0.15    CHANGES:
+         * Added Future->call constructor
+         * Fixed reference-retaining bug in Future's on_cancel callback list
+         * Ensure that ->cancel returns $self even on immediates
+         * Documentation updates to mention ->wrap and ->call, and the fmap
+           family
+
 0.14    CHANGES:
          * Added Future->wrap constructor
          * Added Future::Utils::fmap* family of functions

@@ -232,4 +232,24 @@ use Future;
    is( $failure, "Something broke at $file line $line\n", 'Exception passed to on_fail' );
 }
 
+# call
+{
+   my $future;
+
+   $future = Future->call( sub { Future->new->done( @_ ) }, 1, 2, 3 );
+
+   ok( $future->is_ready, '$future->is_ready from immediate Future->call' );
+   is_deeply( [ $future->get ], [ 1, 2, 3 ], '$future->get from immediate Future->call' );
+
+   $future = Future->call( sub { die "argh!\n" } );
+
+   ok( $future->is_ready, '$future->is_ready from immediate exception of Future->call' );
+   is( $future->failure, "argh!\n", '$future->failure from immediate exception of Future->call' );
+
+   $future = Future->call( sub { "non-future" } );
+
+   ok( $future->is_ready, '$future->is_ready from non-future returning Future->call' );
+   is( $future->failure, "Expected code to return a Future", '$future->failure from non-future returning Future->call' );
+}
+
 done_testing;

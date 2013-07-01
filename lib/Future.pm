@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.14';
+our $VERSION = '0.15';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -189,6 +189,32 @@ sub wrap
    else {
       return $class->new->done( @values );
    }
+}
+
+=head2 $future = Future->call( \&code, @args )
+
+A convenient wrapper for calling a C<CODE> reference that is expected to
+return a C<Future>. In normal circumstances is equivalent to
+
+ $future = $code->( @args )
+
+except that if the code throws an exception, it is wrapped in a new immediate
+fail Future. If the return value from the code is not a blessed C<Future>
+reference, an immediate fail Future is returned instead to complain about this
+fact.
+
+=cut
+
+sub call
+{
+   my $class = shift;
+   my ( $code, @args ) = @_;
+
+   my $f;
+   eval { $f = $code->( @args ); 1 } or $f = $class->new->fail( $@ );
+   blessed $f and $f->isa( "Future" ) or $f = $class->new->fail( "Expected code to return a Future" );
+
+   return $f;
 }
 
 =head2 $future = $f1->followed_by( \&code )
@@ -468,6 +494,7 @@ sub _mark_ready
    }
 
    delete $self->{callbacks}; # To drop references
+   delete $self->{on_cancel};
 }
 
 =head1 IMPLEMENTATION METHODS
@@ -859,7 +886,7 @@ sub cancel
 {
    my $self = shift;
 
-   return if $self->is_ready;
+   return $self if $self->is_ready;
 
    $self->{cancelled}++;
    foreach my $code ( reverse @{ $self->{on_cancel} || [] } ) {
@@ -1362,6 +1389,12 @@ generate a C<Future> that is immediately ready with a result.
 
  my $f = Future->new->done( $value );
 
+This is neater handled by the C<wrap> class method, which encapsulates its
+arguments in a new immediate C<Future>, except if it is given a single
+argument that is already a C<Future>:
+
+ my $f = Future->wrap( $value );
+
 Similarly, the C<fail> and C<die> methods can be used to generate a C<Future>
 that is immediately failed.
 
@@ -1373,6 +1406,11 @@ An C<eval{}> block can be used to turn a C<Future>-returning function that
 might throw an exception, into a C<Future> that would indicate this failure.
 
  my $f = eval { function() } || Future->new->fail( $@ );
+
+This is neater handled by the C<call> class method, which wraps the call in
+an C<eval{}> block and tests the result:
+
+ my $f = Future->call( \&function );
 
 =head2 Sequencing
 

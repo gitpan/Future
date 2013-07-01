@@ -26,6 +26,8 @@ use Future;
 
    # Two refs; one in lexical $fseq, one via $f1
    is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   # Two refs; one in lexical $f1, one in $fseq's cancellation closure
+   is_refcount( $f1, 2, '$f1 has refcount 2 initially' );
 
    is( $called, 0, '$called before $f1 done' );
 
@@ -37,6 +39,7 @@ use Future;
    is_deeply( [ $fseq->get ], [ results => "here" ], '$fseq->get returns results' );
 
    is_oneref( $fseq, '$fseq has refcount 1 before EOF' );
+   is_oneref( $f1, '$f1 has refcount 1 before EOF' );
 }
 
 {
