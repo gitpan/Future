@@ -4,7 +4,6 @@ use strict;
 use warnings;
 
 use Test::More;
-use Test::Warn;
 
 use Future;
 
@@ -62,11 +61,15 @@ use Future;
 
 # Void context raises a warning
 {
-   warnings_are {
-      Future->new->done->transform(
-         done => sub { }
-      );
-   } "Calling ->transform in void context";
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
+
+   Future->new->done->transform(
+      done => sub { }
+   );
+   like( $warnings,
+         qr/^Calling ->transform in void context at /,
+         'Warning in void context' );
 }
 
 done_testing;

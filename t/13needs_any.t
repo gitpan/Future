@@ -157,4 +157,13 @@ use Future;
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
 
+# needs_any on none
+{
+   my $f = Future->needs_any( () );
+
+   ok( $f->is_ready, 'needs_any on no Futures already done' );
+   is( scalar $f->failure, "Cannot ->needs_any with no subfutures",
+       '->get on empty needs_any is empty' );
+}
+
 done_testing;

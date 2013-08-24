@@ -129,4 +129,12 @@ use Future;
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
 
+# wait_all on none
+{
+   my $f = Future->wait_all( () );
+
+   ok( $f->is_ready, 'wait_all on no Futures already done' );
+   is_deeply( [ $f->get ], [], '->get on empty wait_all is empty' );
+}
+
 done_testing;

@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.15';
+our $VERSION = '0.15_001';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -470,10 +470,13 @@ sub _mark_ready
    my $self = shift;
    $self->{ready} = 1;
 
+   delete $self->{on_cancel};
+   my $callbacks = delete $self->{callbacks} or return;
+
    my $fail = defined $self->failure;
    my $done = !$fail && !$self->is_cancelled;
 
-   foreach my $cb ( @{ $self->{callbacks} } ) {
+   foreach my $cb ( @$callbacks ) {
       my ( $type, $code ) = @$cb;
       my $is_future = blessed( $code ) && $code->isa( "Future" );
 
@@ -492,9 +495,6 @@ sub _mark_ready
                     : $code->( $self->failure );
       }
    }
-
-   delete $self->{callbacks}; # To drop references
-   delete $self->{on_cancel};
 }
 
 =head1 IMPLEMENTATION METHODS
@@ -518,7 +518,7 @@ sub done
 {
    my $self = shift;
 
-   $self->is_ready and Carp::croak "$self is already complete and cannot be ->done twice";
+   $self->{ready} and Carp::croak "$self is already complete and cannot be ->done twice";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
    $self->{result} = [ @_ ];
    $self->_mark_ready;
@@ -562,7 +562,7 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
-   $self->is_ready and Carp::croak "$self is already complete and cannot be ->fail'ed";
+   $self->{is_ready} and Carp::croak "$self is already complete and cannot be ->fail'ed";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or Carp::croak "$self ->fail requires an exception that is true";
    $self->{failure} = [ $exception, @details ];
@@ -952,6 +952,9 @@ Returns a new C<Future> instance that will indicate it is ready once all of
 the sub future objects given to it indicate that they are ready, either by
 success or failure. Its result will a list of its component futures.
 
+When given an empty list this constructor returns a new immediately-done
+Future.
+
 This constructor would primarily be used by users of asynchronous interfaces.
 
 =cut
@@ -961,15 +964,19 @@ sub wait_all
    my $class = shift;
    my @subs = @_;
 
-   my $self = Future->_new_dependent( \@subs );
-
-   # Look for immediate ready
-   my $immediate_ready = 1;
-   foreach my $sub ( @subs ) {
-      $sub->is_ready or $immediate_ready = 0, last;
+   unless( @subs ) {
+      my $self = Future->new->done;
+      $self->{subs} = [];
+      return $self;
    }
 
-   if( $immediate_ready ) {
+   my $self = Future->_new_dependent( \@subs );
+
+   my $pending = 0;
+   $_->is_ready or $pending++ for @subs;
+
+   # Look for immediate ready
+   if( !$pending ) {
       $self->{result} = [ @subs ];
       $self->_mark_ready;
       return $self;
@@ -980,9 +987,8 @@ sub wait_all
       return if $_[0]->is_cancelled;
       return unless $weakself;
 
-      foreach my $sub ( @subs ) {
-         $sub->is_ready or return;
-      }
+      $pending--;
+      $pending and return;
 
       $weakself->{result} = [ @subs ];
       $weakself->_mark_ready;
@@ -1003,6 +1009,9 @@ success or failure. Any remaining component futures that are not yet ready
 will be cancelled. Its result will be the result of the first component future
 that was ready; either success or failure.
 
+When given an empty list this constructor returns an immediately-failed
+Future.
+
 This constructor would primarily be used by users of asynchronous interfaces.
 
 =cut
@@ -1011,6 +1020,12 @@ sub wait_any
 {
    my $class = shift;
    my @subs = @_;
+
+   unless( @subs ) {
+      my $self = Future->new->fail( "Cannot ->wait_any with no subfutures" );
+      $self->{subs} = [];
+      return $self;
+   }
 
    my $self = Future->_new_dependent( \@subs );
 
@@ -1074,6 +1089,9 @@ its component futures, in corresponding order. If it fails, its failure will
 be that of the first component future that failed. To access each component
 future's results individually, use C<done_futures>.
 
+When given an empty list this constructor returns a new immediately-done
+Future.
+
 This constructor would primarily be used by users of asynchronous interfaces.
 
 =cut
@@ -1082,6 +1100,12 @@ sub needs_all
 {
    my $class = shift;
    my @subs = @_;
+
+   unless( @subs ) {
+      my $self = Future->new->done;
+      $self->{subs} = [];
+      return $self;
+   }
 
    my $self = Future->_new_dependent( \@subs );
 
@@ -1101,13 +1125,11 @@ sub needs_all
       return $self;
    }
 
-   # Look for immediate done
-   my $immediate_done = 1;
-   foreach my $sub ( @subs ) {
-      $sub->is_ready or $immediate_done = 0, last;
-   }
+   my $pending = 0;
+   $_->is_ready or $pending++ for @subs;
 
-   if( $immediate_done ) {
+   # Look for immediate done
+   if( !$pending ) {
       $self->{result} = [ map { $_->get } @subs ];
       $self->_mark_ready;
       return $self;
@@ -1126,9 +1148,9 @@ sub needs_all
          $weakself->_mark_ready;
       }
       else {
-         foreach my $sub ( @subs ) {
-            $sub->is_ready or return;
-         }
+         $pending--;
+         $pending and return;
+
          $weakself->{result} = [ map { $_->get } @subs ];
          $weakself->_mark_ready;
       }
@@ -1158,6 +1180,9 @@ futures will be done. If it is constructed with multiple that are already done
 however, then all of these will be returned from C<done_futures>. Users should
 be careful to still check all the results from C<done_futures> in that case.
 
+When given an empty list this constructor returns an immediately-failed
+Future.
+
 This constructor would primarily be used by users of asynchronous interfaces.
 
 =cut
@@ -1167,12 +1192,20 @@ sub needs_any
    my $class = shift;
    my @subs = @_;
 
+   unless( @subs ) {
+      my $self = Future->new->fail( "Cannot ->needs_any with no subfutures" );
+      $self->{subs} = [];
+      return $self;
+   }
+
    my $self = Future->_new_dependent( \@subs );
 
    # Look for immediate done
    my $immediate_done;
+   my $pending = 0;
    foreach my $sub ( @subs ) {
       $sub->is_ready and !$sub->failure and $immediate_done = $sub, last;
+      $sub->is_ready or $pending++;
    }
 
    if( $immediate_done ) {
@@ -1203,10 +1236,11 @@ sub needs_any
       return if $_[0]->is_cancelled;
       return unless $weakself;
 
+      $pending--;
+
       if( my @failure = $_[0]->failure ) {
-         foreach my $sub ( @subs ) {
-            $sub->is_ready or return;
-         }
+         $pending and return;
+
          $weakself->{failure} = \@failure;
          $weakself->_mark_ready;
       }

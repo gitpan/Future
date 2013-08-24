@@ -108,4 +108,13 @@ use Future;
    is( $c1, 1, '$future->cancel marks subs cancelled' );
 }
 
+# wait_any on none
+{
+   my $f = Future->wait_any( () );
+
+   ok( $f->is_ready, 'wait_any on no Futures already done' );
+   is( scalar $f->failure, "Cannot ->wait_any with no subfutures",
+       '->get on empty wait_any is empty' );
+}
+
 done_testing;

@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.15';
+our $VERSION = '0.15_001';
 
 use Exporter 'import';
 
@@ -95,11 +95,8 @@ If the eventual future is cancelled, the latest trial future will be
 cancelled.
 
 If some specific subclass or instance of C<Future> is required as the return
-value, it can be passed as the C<return> argument. Otherwise, for backward
-compatibility, the return C<Future> will be constructed by cloning the first
-trial C<Future>. Because this design has been found to be poor, this will be
-removed in a later version. If the trial C<Future> is of some other subclass,
-a warning will be printed about this impending change of behaviour.
+value, it can be passed as the C<return> argument. Otherwise the return value
+will be constructed by cloning the first non-immediate trial C<Future>.
 
 =head2 $future = repeat { CODE } while => CODE
 
@@ -176,20 +173,34 @@ it should return an empty list.
 
 sub _repeat
 {
-   my ( $code, $future, $running, $cond, $sense ) = @_;
-   $$running->on_ready( sub {
-      my $self = shift;
-      my $again = !!$cond->( $self ) ^ $sense;
-      if( $again ) {
-         $$running = Future->call( $code, $self );
-         _repeat( $code, $future, $running, $cond, $sense );
+   my ( $code, $return, $trialp, $cond, $sense ) = @_;
+
+   my $prev = $$trialp;
+
+   while(1) {
+      my $trial = $$trialp ||= Future->call( $code, $prev );
+      $prev = $trial;
+
+      if( !$trial->is_ready ) {
+         # defer
+         $return ||= $trial->new;
+         $trial->on_ready( sub {
+            _repeat( $code, $return, $trialp, $cond, $sense );
+         });
+         return $return;
       }
-      else {
-         # Propagate result
-         $$running->on_done( $future );
-         $$running->on_fail( $future );
+
+      if( !$cond->( $trial ) ^ $sense ) {
+         # Return result
+         $return ||= $trial->new;
+         $trial->on_done( $return );
+         $trial->on_fail( $return );
+         return $return;
       }
-   } );
+
+      # redo
+      undef $$trialp;
+   }
 }
 
 sub repeat(&@)
@@ -253,24 +264,13 @@ sub repeat(&@)
       }
    }
 
-   my $future;
-   my $running;
-   if( $args{return} ) {
-      $future = $args{return};
-      $running = Future->call( $code );
-   }
-   else {
-      $running = Future->call( $code );
-      $future = $running->new;
-      if( ref $future ne "Future" ) {
-         carp "Using a subclassed Trial Future for cloning is deprecated; use the 'return' argument instead"
-      }
-   }
+   my $future = $args{return};
 
-   $args{while} and _repeat( $code, $future, \$running, $args{while}, 0 );
-   $args{until} and _repeat( $code, $future, \$running, $args{until}, 1 );
+   my $trial;
+   $args{while} and $future = _repeat( $code, $future, \$trial, $args{while}, 0 );
+   $args{until} and $future = _repeat( $code, $future, \$trial, $args{until}, 1 );
 
-   $future->on_cancel( sub { $running->cancel } );
+   $future->on_cancel( sub { $trial->cancel } );
 
    return $future;
 }
@@ -338,9 +338,10 @@ futures will be started at once.
 
 =item return => Future
 
-Normally, a new instance is returned of the base C<Future> class. By passing
-a new instance as the C<return> keyword, the result will be put into the given
-instance. This can be used to return subclasses, or specific instances.
+Normally, a new instance is returned by cloning the first non-immediate future
+returned as an item future. By passing a new instance as the C<return>
+argument, the result will be put into the given instance. This can be used to
+return subclasses, or specific instances.
 
 =back
 
@@ -357,32 +358,51 @@ below.
 
 sub _fmap_slot
 {
-   my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $future ) = @_;
+   my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $return ) = @_;
 
-   if( my ( $item ) = $generator->() ) {
-      my $f = $slots->[$idx] = Future->call( $code, $item );
+   while(1) {
+      unless( $slots->[$idx] ) {
+         my $item;
+         unless( ( $item ) = $generator->() ) {
+            undef $slots->[$idx];
+            defined and return for @$slots;
 
-      if( $collect eq "array" ) {
-         push @$results, my $r = [];
-         $f->on_done( sub { @$r = @_; _fmap_slot( @args ); });
-      }
-      elsif( $collect eq "scalar" ) {
-         push @$results, undef;
-         my $r = \$results->[-1];
-         $f->on_done( sub { $$r = $_[0]; _fmap_slot( @args ); });
-      }
-      else {
-         $f->on_done( sub { _fmap_slot( @args ); });
+            $return ||= Future->new;
+
+            $return->done( @$results );
+            return $return;
+         }
+
+         my $f = $slots->[$idx] = Future->call( $code, $item );
+
+         if( $collect eq "array" ) {
+            push @$results, my $r = [];
+            $f->on_done( sub { @$r = @_ });
+         }
+         elsif( $collect eq "scalar" ) {
+            push @$results, undef;
+            my $r = \$results->[-1];
+            $f->on_done( sub { $$r = $_[0] });
+         }
       }
 
-      $f->on_fail( $future );
-      $future->on_cancel( $f );
-   }
-   else {
+      my $f = $slots->[$idx];
+
+      if( !$f->is_ready ) {
+         $args[-1] = ( $return ||= $f->new );
+         $f->on_done( sub { _fmap_slot( @args ) } );
+         $f->on_fail( $return );
+         return $return;
+      }
+
+      if( $f->failure ) {
+         $return ||= $f->new;
+         $return->fail( $f->failure );
+         return $return;
+      }
+
       undef $slots->[$idx];
-      defined and return for @$slots;
-
-      $future->done( @$results );
+      # next
    }
 }
 
@@ -395,7 +415,7 @@ sub _fmap
    my @slots = ( undef ) x $concurrent;
 
    my $results = [];
-   my $future = $args{return} || Future->new;
+   my $future = $args{return};
 
    my $generator;
    if( $generator = $args{generate} ) {
@@ -409,10 +429,16 @@ sub _fmap
    }
 
    # If any of these immediately fail, don't bother continuing
-   $future->is_ready || _fmap_slot( \@slots, $_, $code, $generator, $args{collect}, $results, $future ) for 0 .. $#slots;
+   foreach my $idx ( 0 .. $#slots ) {
+      $future = _fmap_slot( \@slots, $idx, $code, $generator, $args{collect}, $results, $future );
+      last if $future->is_ready;
+   }
 
    $future->on_fail( sub {
       !defined $_ or $_->is_ready or $_->cancel for @slots;
+   });
+   $future->on_cancel( sub {
+      $_->cancel for @slots;
    });
 
    return $future;

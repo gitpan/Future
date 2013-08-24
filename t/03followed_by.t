@@ -7,7 +7,6 @@ use Test::More;
 use Test::Fatal;
 use Test::Identity;
 use Test::Refcount;
-use Test::Warn;
 
 use Future;
 
@@ -123,12 +122,16 @@ use Future;
 
 # Void context raises a warning
 {
-   warnings_are {
-      Future->new->done->followed_by(
-         sub { Future->new }
-      );
-   } "Calling ->followed_by in void context",
-      'Warning in void context';
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
+
+   Future->new->done->followed_by(
+      sub { Future->new }
+   );
+
+   like( $warnings,
+         qr/^Calling ->followed_by in void context at /,
+         'Warning in void context' );
 }
 
 # Non-Future return raises exception

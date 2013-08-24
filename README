@@ -423,6 +423,9 @@ DEPENDENT FUTURES
     either by success or failure. Its result will a list of its component
     futures.
 
+    When given an empty list this constructor returns a new immediately-done
+    Future.
+
     This constructor would primarily be used by users of asynchronous
     interfaces.
 
@@ -432,6 +435,9 @@ DEPENDENT FUTURES
     either by success or failure. Any remaining component futures that are
     not yet ready will be cancelled. Its result will be the result of the
     first component future that was ready; either success or failure.
+
+    When given an empty list this constructor returns an immediately-failed
+    Future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -447,6 +453,9 @@ DEPENDENT FUTURES
     all its component futures, in corresponding order. If it fails, its
     failure will be that of the first component future that failed. To
     access each component future's results individually, use `done_futures'.
+
+    When given an empty list this constructor returns a new immediately-done
+    Future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -468,6 +477,9 @@ DEPENDENT FUTURES
     are already done however, then all of these will be returned from
     `done_futures'. Users should be careful to still check all the results
     from `done_futures' in that case.
+
+    When given an empty list this constructor returns an immediately-failed
+    Future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.

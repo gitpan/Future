@@ -5,7 +5,6 @@ use warnings;
 
 use Test::More;
 use Test::Fatal;
-use Test::Warn;
 
 use Future;
 
@@ -129,19 +128,23 @@ use Future;
 
 # Void context raises a warning
 {
-   warnings_are {
-      Future->new->done->then(
-         sub { Future->new }
-      );
-   } "Calling ->then in void context",
-      'Warning in void context';
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   warnings_are {
-      Future->new->done->else(
-         sub { Future->new }
-      );
-   } "Calling ->else in void context",
-      'Warning in void context';
+   Future->new->done->then(
+      sub { Future->new }
+   );
+   like( $warnings,
+         qr/^Calling ->then in void context /,
+         'Warning in void context' );
+
+   undef $warnings;
+   Future->new->done->else(
+      sub { Future->new }
+   );
+   like( $warnings,
+         qr/^Calling ->else in void context /,
+         'Warning in void context' );
 }
 
 # Non-Future return raises exception
