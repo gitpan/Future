@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.15_001';
+our $VERSION = '0.16';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );

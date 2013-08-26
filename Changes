@@ -1,12 +1,12 @@
 Revision history for Future
 
-0.15_001 CHANGES:
+0.16    CHANGES:
          * Proper behaviour of ->wait_all and ->needs_all on an empty list -
            just return empty immediate done
          * Proper behaviour of ->wait_any and ->needs_any on an empty list -
            return an immediate failure
          * Performance improvement to ->done for immediate Future->new->done
-         * Keep a count of pending child futures to avoid quadratici behaviour
+         * Keep a count of pending child futures to avoid quadratic behaviour
            due to linear scan of children every time one completes
          * Improve efficiency of Future::Utils::repeat and fmap* when trials
            return immediates
