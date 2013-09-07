@@ -1,5 +1,16 @@
 Revision history for Future
 
+0.17    2013/09/07 16:53:47
+        [CHANGES]
+         * Performance improvement by using direct member access instead of
+           accessor methods
+         * Documentation updates; suggestion of documentation style for
+           Future-returning code
+
+        [BUGFIXES]
+         * Respect subclassing of immediate->followed_by and dependent futures
+           with mixed subclass or immediate components
+
 0.16    CHANGES:
          * Proper behaviour of ->wait_all and ->needs_all on an empty list -
            just return empty immediate done

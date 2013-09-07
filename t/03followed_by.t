@@ -93,7 +93,26 @@ use Future;
 
    $fseq->cancel;
 
-   ok( $f1->is_cancelled, '$f1 cancelled by $fseq cancel' );
+   ok( $f1->is_cancelled, '$f1 cancelled by $fseq->cancel' );
+
+   $f1 = Future->new;
+   my $f2 = Future->new;
+
+   $fseq = $f1->followed_by( sub { $f2 } );
+
+   $f1->done;
+   $fseq->cancel;
+
+   ok( $f2->is_cancelled, '$f2 cancelled by $fseq->cancel' );
+
+   $f1 = Future->new->done;
+   $f2 = Future->new;
+
+   $fseq = $f1->followed_by( sub { $f2 } );
+
+   $fseq->cancel;
+
+   ok( $f2->is_cancelled, '$f2 cancelled by $fseq->cancel on $f1 immediate' );
 }
 
 # immediately done
@@ -118,6 +137,22 @@ use Future;
    );
 
    is( $called, 1, 'followed_by block invoked immediately for already-failed' );
+}
+
+# immediately code dies
+{
+   my $f1 = Future->new->done;
+
+   my $fseq;
+
+   ok( !defined exception {
+      $fseq = $f1->followed_by( sub {
+         die "It fails\n";
+      } );
+   }, 'exception not propagated from ->followed_by on immediate' );
+
+   ok( $fseq->is_ready, '$fseq is ready after code exception on immediate' );
+   is( scalar $fseq->failure, "It fails\n", '$fseq->failure after code exception on immediate' );
 }
 
 # Void context raises a warning

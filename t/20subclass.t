@@ -6,6 +6,7 @@ use warnings;
 use Test::More;
 use Test::Identity;
 
+# subclass->...
 {
    my $f = t::Future::Subclass->new;
 
@@ -24,6 +25,20 @@ use Test::Identity;
    isa_ok( $f->transform(),
            "t::Future::Subclass",
            '$f->transform' );
+}
+
+# immediate->followed_by( sub { subclass } )
+{
+   my $f = t::Future::Subclass->new;
+
+   isa_ok( Future->new->done->followed_by( sub { $f } ),
+           "t::Future::Subclass",
+           'imm->followed_by $f' );
+}
+
+# dependents
+{
+   my $f = t::Future::Subclass->new;
 
    isa_ok( Future->wait_all( $f ),
            "t::Future::Subclass",
@@ -40,6 +55,12 @@ use Test::Identity;
    isa_ok( Future->needs_any( $f ),
            "t::Future::Subclass",
            'Future->needs_any( $f )' );
+
+   my $imm = Future->new->done;
+
+   isa_ok( Future->wait_all( $imm, $f ),
+           "t::Future::Subclass",
+           'Future->wait_all( $imm, $f )' );
 }
 
 my $f_await;

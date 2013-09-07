@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.16';
+our $VERSION = '0.17';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -49,14 +49,14 @@ are called "dependent" futures here, and are returned by the various C<wait_*>
 and C<need_*> constructors.
 
 It is intended that library functions that perform asynchonous operations
-would use C<Future> objects to represent outstanding operations, and allow
-their calling programs to control or wait for these operations to complete.
-The implementation and the user of such an interface would typically make use
-of different methods on the class. The methods below are documented in two
+would use future objects to represent outstanding operations, and allow their
+calling programs to control or wait for these operations to complete. The
+implementation and the user of such an interface would typically make use of
+different methods on the class. The methods below are documented in two
 sections; those of interest to each side of the interface.
 
 See also L<Future::Utils> which contains useful loop-constructing functions,
-to run a C<Future>-returning function repeatedly in a loop.
+to run a future-returning function repeatedly in a loop.
 
 =head2 SUBCLASSING
 
@@ -64,7 +64,7 @@ This class easily supports being subclassed to provide extra behavior, such as
 giving the C<get> method the ability to block and wait for completion. This
 may be useful to provide C<Future> subclasses with event systems, or similar.
 
-Each method that returns a new C<Future> object will use the invocant to
+Each method that returns a new future object will use the invocant to
 construct its return value. If the constructor needs to perform per-instance
 setup it can override the C<new> method, and take context from the given
 instance.
@@ -89,15 +89,36 @@ C<get> and C<failure> methods if the instance is pending.
 
  $f->await
 
+In most cases this should allow future-returning modules to be used as if they
+were blocking call/return-style modules, by simply appending a C<get> call to
+the function or method calls.
+
+ my ( $results, $here ) = future_returning_function( @args )->get;
+
 The F<examples> directory in the distribution contains some examples of how
-C<Future>s might be integrated with various event systems.
+futures might be integrated with various event systems.
+
+=head2 MODULE DOCUMENTATION
+
+Modules that provide future-returning functions or methods may wish to adopt
+the following styles in some way, to document the eventual return values from
+these futures.
+
+ func( ARGS, HERE... ) ==> ( RETURN, VALUES... )
+
+ OBJ->method( ARGS, HERE... ) ==> ( RETURN, VALUES... )
+
+Code returning a future that yields no values on success can use empty
+parentheses.
+
+ func( ... ) ==> ()
 
 =head2 DEBUGGING
 
 By the time a C<Future> object is destroyed, it ought to have been completed
 or cancelled. By enabling debug tracing of objects, this fact can be checked.
-If a C<Future> object is destroyed without having been completed or cancelled,
-a warning message is printed.
+If a future object is destroyed without having been completed or cancelled, a
+warning message is printed.
 
 This feature is enabled by setting an environment variable called
 C<PERL_FUTURE_DEBUG> to some true value.
@@ -115,10 +136,10 @@ line following the line calling that function.
  sub foo {
     my $f = Future->new;
  }
- 
+
  foo();
  print "Finished\n";
- 
+
  Future=HASH(0x14a2220) was constructed at - line 2 and was lost near - line 6 before it was ready.
  Finished
 
@@ -160,7 +181,7 @@ END { $GLOBAL_END = 1; }
    my $self = shift;
    return if $GLOBAL_END;
 
-   return if $self->is_ready;
+   return if $self->{ready};
 
    my $lost_at = join " line ", (caller)[1,2];
    # We can't actually know the real line where the last reference was lost; 
@@ -194,13 +215,13 @@ sub wrap
 =head2 $future = Future->call( \&code, @args )
 
 A convenient wrapper for calling a C<CODE> reference that is expected to
-return a C<Future>. In normal circumstances is equivalent to
+return a future. In normal circumstances is equivalent to
 
  $future = $code->( @args )
 
 except that if the code throws an exception, it is wrapped in a new immediate
-fail Future. If the return value from the code is not a blessed C<Future>
-reference, an immediate fail Future is returned instead to complain about this
+fail future. If the return value from the code is not a blessed C<Future>
+reference, an immediate fail future is returned instead to complain about this
 fact.
 
 =cut
@@ -236,7 +257,7 @@ caught and set as the failure for the returned C<$fseq>. The exception will
 not be propagated to the caller of the method that caused C<$f1> to be ready.
 
 As it is always a mistake to call this method in void context and lose the
-reference to the returned C<Future> (because exception/error handling would be
+reference to the returned future (because exception/error handling would be
 silently dropped), this method warns in void context.
 
 =cut
@@ -251,16 +272,20 @@ sub followed_by
    $func = (caller 1)[3] and $func =~ s/^.*::// if caller eq __PACKAGE__;
    my $where = Carp::shortmess "in $func";
 
-   my $fseq = $f1->new;
+   my $fseq;
+   # Only clone $f1 if it's not immediately done. If it is done, we know that
+   # on_ready will definitely run so we can initialise it there as $f2 instead.
+   $fseq = $f1->new if !$f1->is_ready;
 
    my $f2;
 
    $f1->on_ready( sub {
       my $self = shift;
 
-      return if $self->is_cancelled;
+      return if $self->{cancelled};
 
       unless( eval { $f2 = $code->( $self ); 1 } ) {
+         $fseq ||= Future->new;
          $fseq->fail( $@ );
          return;
       }
@@ -269,12 +294,15 @@ sub followed_by
          die "Expected code to return a Future $where";
       }
 
+      # If $f1 was immediate, we might as well just return $f2
+      $fseq = $f2, return unless $fseq;
+
       $f2->on_ready( sub {
          my $f2 = shift;
-         if( $f2->is_cancelled ) {
+         if( $f2->{cancelled} ) {
             return;
          }
-         elsif( $f2->failure ) {
+         elsif( $f2->{failure} ) {
             $fseq->fail( $f2->failure );
          }
          else {
@@ -285,7 +313,7 @@ sub followed_by
 
    $fseq->on_cancel( sub {
       ( $f2 || $f1 )->cancel
-   } ) if not $fseq->is_ready;
+   } ) if not $fseq->{ready} and not $f2;
 
    if( !defined wantarray ) {
       Carp::carp "Calling ->$func in void context";
@@ -310,7 +338,7 @@ sub and_then
 
    return $self->followed_by( sub {
       my $self = shift;
-      return $self if $self->failure;
+      return $self if $self->{failure};
       return $code->( $self );
    });
 }
@@ -331,7 +359,7 @@ sub or_else
 
    return $self->followed_by( sub {
       my $self = shift;
-      return $self if not $self->failure;
+      return $self if not $self->{failure};
       return $code->( $self );
    });
 }
@@ -381,7 +409,7 @@ block does not need the initial future object itself, only the failure.
 The C<then> method can also be passed the C<$fail_code> block as well, giving
 a combination of C<then> and C<else> behaviour.
 
-This operation is designed to be compatible with the semantics of other Future
+This operation is designed to be compatible with the semantics of other future
 systems, such as Javascript's Q or Promises/A libraries.
 
 =cut
@@ -393,7 +421,7 @@ sub then
 
    return $self->followed_by( sub {
       my $self = shift;
-      if( !$self->failure ) {
+      if( !$self->{failure} ) {
          return $self unless $done_code;
          return $done_code->( $self->get );
       }
@@ -411,7 +439,7 @@ sub else
 
    return $self->followed_by( sub {
       my $self = shift;
-      return $self unless $self->failure;
+      return $self unless $self->{failure};
       return $fail_code->( $self->failure );
    } );
 }
@@ -454,7 +482,7 @@ sub transform
 
    return $self->followed_by( sub {
       my $self = shift;
-      if( !$self->failure ) {
+      if( !$self->{failure} ) {
          return $self unless $xfrm_done;
          return $self->new->done( $xfrm_done->( $self->get ) );
       }
@@ -473,26 +501,29 @@ sub _mark_ready
    delete $self->{on_cancel};
    my $callbacks = delete $self->{callbacks} or return;
 
-   my $fail = defined $self->failure;
-   my $done = !$fail && !$self->is_cancelled;
+   my $fail = defined $self->{failure};
+   my $done = !$fail && !$self->{cancelled};
+
+   my @result  = $done ? $self->get : ();
+   my @failure = $fail ? $self->failure : ();
 
    foreach my $cb ( @$callbacks ) {
       my ( $type, $code ) = @$cb;
       my $is_future = blessed( $code ) && $code->isa( "Future" );
 
       if( $type eq "ready" ) {
-         $is_future ? ( $done ? $code->done( $self->get ) :
-                        $fail ? $code->fail( $self->failure ) :
+         $is_future ? ( $done ? $code->done( @result ) :
+                        $fail ? $code->fail( @failure ) :
                                 $code->cancel )
                     : $code->( $self );
       }
       elsif( $type eq "done" and $done ) {
-         $is_future ? $code->done( $self->get ) 
-                    : $code->( $self->get );
+         $is_future ? $code->done( @result ) 
+                    : $code->( @result );
       }
       elsif( $type eq "failed" and $fail ) {
-         $is_future ? $code->fail( $self->failure )
-                    : $code->( $self->failure );
+         $is_future ? $code->fail( @failure )
+                    : $code->( @failure );
       }
    }
 }
@@ -510,7 +541,9 @@ Marks that the leaf future is now ready, and provides a list of values as a
 result. (The empty list is allowed, and still indicates the future as ready).
 Cannot be called on a dependent future.
 
-Returns the C<$future>.
+Returns the C<$future> to allow easy chaining to create an immediate future by
+
+ return Future->new->done( ... )
 
 =cut
 
@@ -553,7 +586,10 @@ Further details may be provided that will be returned by the C<failure> method
 in list context. These details will not be part of the exception string raised
 by C<get>.
 
-Returns the C<$future>.
+Returns the C<$future> to allow easy chaining to create an immediate failed
+future by
+
+ return Future->new->fail( ... )
 
 =cut
 
@@ -562,7 +598,7 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
-   $self->{is_ready} and Carp::croak "$self is already complete and cannot be ->fail'ed";
+   $self->{ready} and Carp::croak "$self is already complete and cannot be ->fail'ed";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or Carp::croak "$self ->fail requires an exception that is true";
    $self->{failure} = [ $exception, @details ];
@@ -632,7 +668,7 @@ is already complete.
 sub on_cancel
 {
    my $self = shift;
-   $self->is_ready and return $self;
+   $self->{ready} and return $self;
 
    push @{ $self->{on_cancel} }, @_;
 
@@ -700,11 +736,11 @@ sub on_ready
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->is_ready ) {
+   if( $self->{ready} ) {
       my $is_future = blessed( $code ) && $code->isa( "Future" );
 
-      my $fail = defined $self->failure;
-      my $done = !$fail && !$self->is_cancelled;
+      my $fail = defined $self->{failure};
+      my $done = !$fail && !$self->{cancelled};
 
       $is_future ? ( $done ? $code->done( $self->get ) :
                      $fail ? $code->fail( $self->failure ) :
@@ -730,25 +766,30 @@ scalar context it returns just the first result value.
 If the future is ready but failed, this method raises as an exception the
 failure string or object that was given to the C<fail> method.
 
-If it is not yet ready, or was cancelled, an exception is thrown.
+If the future was cancelled an exception is thrown.
+
+If it is not yet ready and is not of a subclass that provides an C<await>
+method an exception is thrown. If it is subclassed to provide an C<await>
+method then this is used to wait for the future to be ready, before returning
+the result or propagating its failure exception.
 
 =cut
 
 sub await
 {
    my $self = shift;
-   Carp::croak "$self is not yet complete";
+   Carp::croak "$self is not yet complete and does not provide ->await";
 }
 
 sub get
 {
    my $self = shift;
-   $self->await until $self->is_ready;
+   $self->await until $self->{ready};
    if( $self->{failure} ) {
       my $exception = $self->{failure}->[0];
       !ref $exception && $exception =~ m/\n$/ ? CORE::die $exception : Carp::croak $exception;
    }
-   $self->is_cancelled and Carp::croak "$self was cancelled";
+   $self->{cancelled} and Carp::croak "$self was cancelled";
    return $self->{result}->[0] unless wantarray;
    return @{ $self->{result} };
 }
@@ -778,8 +819,8 @@ sub on_done
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->is_ready ) {
-      return $self if $self->failure or $self->is_cancelled;
+   if( $self->{ready} ) {
+      return $self if $self->{failure} or $self->{cancelled};
 
       my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->done( $self->get ) 
@@ -819,7 +860,7 @@ statement:
 sub failure
 {
    my $self = shift;
-   $self->await until $self->is_ready;
+   $self->await until $self->{ready};
    return unless $self->{failure};
    return $self->{failure}->[0] if !wantarray;
    return @{ $self->{failure} };
@@ -856,8 +897,8 @@ sub on_fail
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->is_ready ) {
-      return $self if not $self->failure;
+   if( $self->{ready} ) {
+      return $self if not $self->{failure};
 
       my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->fail( $self->failure )
@@ -875,7 +916,7 @@ sub on_fail
 Requests that the future be cancelled, immediately marking it as ready. This
 will invoke all of the code blocks registered by C<on_cancel>, in the reverse
 order. When called on a dependent future, all its component futures are also
-cancelled. It is not an error to attempt to cancel a Future that is already
+cancelled. It is not an error to attempt to cancel a future that is already
 complete or cancelled; it simply has no effect.
 
 Returns the C<$future>.
@@ -886,7 +927,7 @@ sub cancel
 {
    my $self = shift;
 
-   return $self if $self->is_ready;
+   return $self if $self->{ready};
 
    $self->{cancelled}++;
    foreach my $code ( reverse @{ $self->{on_cancel} || [] } ) {
@@ -920,8 +961,9 @@ sub cancel_cb
 
 The following constructors all take a list of component futures, and return a
 new future whose readiness somehow depends on the readiness of those
-components. The first component future will be used as the prototype for
-constructing the return value, so it respects subclassing correctly.
+components. The first non-immediate component future will be used as the
+prototype for constructing the return value, so it respects subclassing
+correctly.
 
 =cut
 
@@ -929,17 +971,23 @@ sub _new_dependent
 {
    shift; # ignore this class
    my ( $subs ) = @_;
-   my $self = $subs->[0]->new;
 
    foreach my $sub ( @$subs ) {
       blessed $sub and $sub->isa( "Future" ) or Carp::croak "Expected a Future, got $_";
    }
 
+   my $self;
+   $_->is_ready or $self = $_->new, last for @$subs;
+
+   # No non-immediates; just clone the first one anyway then because the
+   # result will necessarily be immediate
+   $self ||= $subs->[0]->new;
+
    $self->{subs} = $subs;
 
    $self->on_cancel( sub {
       foreach my $sub ( @$subs ) {
-         $sub->cancel if !$sub->is_ready;
+         $sub->cancel if !$sub->{ready};
       }
    } );
 
@@ -953,7 +1001,7 @@ the sub future objects given to it indicate that they are ready, either by
 success or failure. Its result will a list of its component futures.
 
 When given an empty list this constructor returns a new immediately-done
-Future.
+future.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -973,7 +1021,7 @@ sub wait_all
    my $self = Future->_new_dependent( \@subs );
 
    my $pending = 0;
-   $_->is_ready or $pending++ for @subs;
+   $_->{ready} or $pending++ for @subs;
 
    # Look for immediate ready
    if( !$pending ) {
@@ -984,7 +1032,7 @@ sub wait_all
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->is_cancelled;
+      return if $_[0]->{cancelled};
       return unless $weakself;
 
       $pending--;
@@ -995,7 +1043,7 @@ sub wait_all
    };
 
    foreach my $sub ( @subs ) {
-      $sub->is_ready or $sub->on_ready( $sub_on_ready );
+      $sub->{ready} or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;
@@ -1010,7 +1058,7 @@ will be cancelled. Its result will be the result of the first component future
 that was ready; either success or failure.
 
 When given an empty list this constructor returns an immediately-failed
-Future.
+future.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -1032,15 +1080,15 @@ sub wait_any
    # Look for immediate ready
    my $immediate_ready;
    foreach my $sub ( @subs ) {
-      $sub->is_ready and $immediate_ready = $sub, last;
+      $sub->{ready} and $immediate_ready = $sub, last;
    }
 
    if( $immediate_ready ) {
       foreach my $sub ( @subs ) {
-         $sub->is_ready or $sub->cancel;
+         $sub->{ready} or $sub->cancel;
       }
 
-      if( $immediate_ready->failure ) {
+      if( $immediate_ready->{failure} ) {
          $self->{failure} = [ $immediate_ready->failure ];
       }
       else {
@@ -1052,14 +1100,14 @@ sub wait_any
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->is_cancelled;
+      return if $_[0]->{cancelled};
       return unless $weakself;
 
       foreach my $sub ( @subs ) {
-         $sub->is_ready or $sub->cancel;
+         $sub->{ready} or $sub->cancel;
       }
 
-      if( $_[0]->failure ) {
+      if( $_[0]->{failure} ) {
          $weakself->{failure} = [ $_[0]->failure ];
       }
       else {
@@ -1069,7 +1117,7 @@ sub wait_any
    };
 
    foreach my $sub ( @subs ) {
-      # No need to test $sub->is_ready since we know none of them are
+      # No need to test $sub->{ready} since we know none of them are
       $sub->on_ready( $sub_on_ready );
    }
 
@@ -1090,7 +1138,7 @@ be that of the first component future that failed. To access each component
 future's results individually, use C<done_futures>.
 
 When given an empty list this constructor returns a new immediately-done
-Future.
+future.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -1112,12 +1160,12 @@ sub needs_all
    # Look for immediate fail
    my $immediate_fail;
    foreach my $sub ( @subs ) {
-      $sub->is_ready and $sub->failure and $immediate_fail = $sub, last;
+      $sub->{ready} and $sub->{failure} and $immediate_fail = $sub, last;
    }
 
    if( $immediate_fail ) {
       foreach my $sub ( @subs ) {
-         $sub->is_ready or $sub->cancel;
+         $sub->{ready} or $sub->cancel;
       }
 
       $self->{failure} = [ $immediate_fail->failure ];
@@ -1126,7 +1174,7 @@ sub needs_all
    }
 
    my $pending = 0;
-   $_->is_ready or $pending++ for @subs;
+   $_->{ready} or $pending++ for @subs;
 
    # Look for immediate done
    if( !$pending ) {
@@ -1137,12 +1185,12 @@ sub needs_all
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->is_cancelled;
+      return if $_[0]->{cancelled};
       return unless $weakself;
 
       if( my @failure = $_[0]->failure ) {
          foreach my $sub ( @subs ) {
-            $sub->cancel if !$sub->is_ready;
+            $sub->cancel if !$sub->{ready};
          }
          $weakself->{failure} = \@failure;
          $weakself->_mark_ready;
@@ -1157,7 +1205,7 @@ sub needs_all
    };
 
    foreach my $sub ( @subs ) {
-      $sub->is_ready or $sub->on_ready( $sub_on_ready );
+      $sub->{ready} or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;
@@ -1175,13 +1223,13 @@ If successful, its result will be that of the first component future that
 succeeded. If it fails, its failure will be that of the last component future
 to fail. To access the other failures, use C<failed_futures>.
 
-Normally when this Future completes successfully, only one of its component
+Normally when this future completes successfully, only one of its component
 futures will be done. If it is constructed with multiple that are already done
 however, then all of these will be returned from C<done_futures>. Users should
 be careful to still check all the results from C<done_futures> in that case.
 
 When given an empty list this constructor returns an immediately-failed
-Future.
+future.
 
 This constructor would primarily be used by users of asynchronous interfaces.
 
@@ -1204,13 +1252,13 @@ sub needs_any
    my $immediate_done;
    my $pending = 0;
    foreach my $sub ( @subs ) {
-      $sub->is_ready and !$sub->failure and $immediate_done = $sub, last;
-      $sub->is_ready or $pending++;
+      $sub->{ready} and !$sub->{failure} and $immediate_done = $sub, last;
+      $sub->{ready} or $pending++;
    }
 
    if( $immediate_done ) {
       foreach my $sub ( @subs ) {
-         $sub->is_ready or $sub->cancel;
+         $sub->{ready} or $sub->cancel;
       }
 
       $self->{result} = [ $immediate_done->get ];
@@ -1221,19 +1269,19 @@ sub needs_any
    # Look for immediate fail
    my $immediate_fail = 1;
    foreach my $sub ( @subs ) {
-      $sub->is_ready or $immediate_fail = 0, last;
+      $sub->{ready} or $immediate_fail = 0, last;
    }
 
    if( $immediate_fail ) {
       # For consistency we'll pick the last one for the failure
-      $self->{failure} = [ $subs[-1]->failure ];
+      $self->{failure} = [ $subs[-1]->{failure} ];
       $self->_mark_ready;
       return $self;
    }
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->is_cancelled;
+      return if $_[0]->{cancelled};
       return unless $weakself;
 
       $pending--;
@@ -1246,7 +1294,7 @@ sub needs_any
       }
       else {
          foreach my $sub ( @subs ) {
-            $sub->cancel if !$sub->is_ready;
+            $sub->cancel if !$sub->{ready};
          }
          $weakself->{result} = [ $_[0]->get ];
          $weakself->_mark_ready;
@@ -1254,7 +1302,7 @@ sub needs_any
    };
 
    foreach my $sub ( @subs ) {
-      $sub->is_ready or $sub->on_ready( $sub_on_ready );
+      $sub->{ready} or $sub->on_ready( $sub_on_ready );
    }
 
    return $self;
@@ -1287,35 +1335,35 @@ sub pending_futures
 {
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->pending_futures on a non-dependent Future";
-   return grep { not $_->is_ready } @{ $self->{subs} };
+   return grep { not $_->{ready} } @{ $self->{subs} };
 }
 
 sub ready_futures
 {
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->ready_futures on a non-dependent Future";
-   return grep { $_->is_ready } @{ $self->{subs} };
+   return grep { $_->{ready} } @{ $self->{subs} };
 }
 
 sub done_futures
 {
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->done_futures on a non-dependent Future";
-   return grep { $_->is_ready and not $_->failure and not $_->is_cancelled } @{ $self->{subs} };
+   return grep { $_->{ready} and not $_->{failure} and not $_->{cancelled} } @{ $self->{subs} };
 }
 
 sub failed_futures
 {
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->failed_futures on a non-dependent Future";
-   return grep { $_->is_ready and $_->failure } @{ $self->{subs} };
+   return grep { $_->{ready} and $_->{failure} } @{ $self->{subs} };
 }
 
 sub cancelled_futures
 {
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->cancelled_futures on a non-dependent Future";
-   return grep { $_->is_ready and $_->is_cancelled } @{ $self->{subs} };
+   return grep { $_->{ready} and $_->{cancelled} } @{ $self->{subs} };
 }
 
 =head1 EXAMPLES

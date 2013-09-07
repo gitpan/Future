@@ -29,15 +29,15 @@ DESCRIPTION
     the various `wait_*' and `need_*' constructors.
 
     It is intended that library functions that perform asynchonous
-    operations would use `Future' objects to represent outstanding
-    operations, and allow their calling programs to control or wait for
-    these operations to complete. The implementation and the user of such an
-    interface would typically make use of different methods on the class.
-    The methods below are documented in two sections; those of interest to
-    each side of the interface.
+    operations would use future objects to represent outstanding operations,
+    and allow their calling programs to control or wait for these operations
+    to complete. The implementation and the user of such an interface would
+    typically make use of different methods on the class. The methods below
+    are documented in two sections; those of interest to each side of the
+    interface.
 
     See also Future::Utils which contains useful loop-constructing
-    functions, to run a `Future'-returning function repeatedly in a loop.
+    functions, to run a future-returning function repeatedly in a loop.
 
   SUBCLASSING
     This class easily supports being subclassed to provide extra behavior,
@@ -45,7 +45,7 @@ DESCRIPTION
     completion. This may be useful to provide `Future' subclasses with event
     systems, or similar.
 
-    Each method that returns a new `Future' object will use the invocant to
+    Each method that returns a new future object will use the invocant to
     construct its return value. If the constructor needs to perform
     per-instance setup it can override the `new' method, and take context
     from the given instance.
@@ -70,13 +70,33 @@ DESCRIPTION
 
      $f->await
 
+    In most cases this should allow future-returning modules to be used as
+    if they were blocking call/return-style modules, by simply appending a
+    `get' call to the function or method calls.
+
+     my ( $results, $here ) = future_returning_function( @args )->get;
+
     The examples directory in the distribution contains some examples of how
-    `Future's might be integrated with various event systems.
+    futures might be integrated with various event systems.
+
+  MODULE DOCUMENTATION
+    Modules that provide future-returning functions or methods may wish to
+    adopt the following styles in some way, to document the eventual return
+    values from these futures.
+
+     func( ARGS, HERE... ) ==> ( RETURN, VALUES... )
+
+     OBJ->method( ARGS, HERE... ) ==> ( RETURN, VALUES... )
+
+    Code returning a future that yields no values on success can use empty
+    parentheses.
+
+     func( ... ) ==> ()
 
   DEBUGGING
     By the time a `Future' object is destroyed, it ought to have been
     completed or cancelled. By enabling debug tracing of objects, this fact
-    can be checked. If a `Future' object is destroyed without having been
+    can be checked. If a future object is destroyed without having been
     completed or cancelled, a warning message is printed.
 
     This feature is enabled by setting an environment variable called
@@ -95,10 +115,10 @@ DESCRIPTION
      sub foo {
         my $f = Future->new;
      }
- 
+
      foo();
      print "Finished\n";
- 
+
      Future=HASH(0x14a2220) was constructed at - line 2 and was lost near - line 6 before it was ready.
      Finished
 
@@ -121,13 +141,13 @@ CONSTRUCTORS
 
   $future = Future->call( \&code, @args )
     A convenient wrapper for calling a `CODE' reference that is expected to
-    return a `Future'. In normal circumstances is equivalent to
+    return a future. In normal circumstances is equivalent to
 
      $future = $code->( @args )
 
     except that if the code throws an exception, it is wrapped in a new
-    immediate fail Future. If the return value from the code is not a
-    blessed `Future' reference, an immediate fail Future is returned instead
+    immediate fail future. If the return value from the code is not a
+    blessed `Future' reference, an immediate fail future is returned instead
     to complain about this fact.
 
   $future = $f1->followed_by( \&code )
@@ -149,7 +169,7 @@ CONSTRUCTORS
     be ready.
 
     As it is always a mistake to call this method in void context and lose
-    the reference to the returned `Future' (because exception/error handling
+    the reference to the returned future (because exception/error handling
     would be silently dropped), this method warns in void context.
 
   $future = $f1->and_then( \&code )
@@ -207,7 +227,7 @@ CONSTRUCTORS
     giving a combination of `then' and `else' behaviour.
 
     This operation is designed to be compatible with the semantics of other
-    Future systems, such as Javascript's Q or Promises/A libraries.
+    future systems, such as Javascript's Q or Promises/A libraries.
 
   $future = $f1->transform( %args )
     Returns a new `Future' instance that wraps the one given as `$f1'. With
@@ -238,7 +258,10 @@ IMPLEMENTATION METHODS
     as a result. (The empty list is allowed, and still indicates the future
     as ready). Cannot be called on a dependent future.
 
-    Returns the `$future'.
+    Returns the `$future' to allow easy chaining to create an immediate
+    future by
+
+     return Future->new->done( ... )
 
   $code = $future->done_cb
     Returns a `CODE' reference that, when invoked, calls the `done' method.
@@ -257,7 +280,10 @@ IMPLEMENTATION METHODS
     `failure' method in list context. These details will not be part of the
     exception string raised by `get'.
 
-    Returns the `$future'.
+    Returns the `$future' to allow easy chaining to create an immediate
+    failed future by
+
+     return Future->new->fail( ... )
 
   $code = $future->fail_cb
     Returns a `CODE' reference that, when invoked, calls the `fail' method.
@@ -332,7 +358,12 @@ USER METHODS
     If the future is ready but failed, this method raises as an exception
     the failure string or object that was given to the `fail' method.
 
-    If it is not yet ready, or was cancelled, an exception is thrown.
+    If the future was cancelled an exception is thrown.
+
+    If it is not yet ready and is not of a subclass that provides an `await'
+    method an exception is thrown. If it is subclassed to provide an `await'
+    method then this is used to wait for the future to be ready, before
+    returning the result or propagating its failure exception.
 
   $future->on_done( $code )
     If the future is not yet ready, adds a callback to be invoked when the
@@ -397,7 +428,7 @@ USER METHODS
     This will invoke all of the code blocks registered by `on_cancel', in
     the reverse order. When called on a dependent future, all its component
     futures are also cancelled. It is not an error to attempt to cancel a
-    Future that is already complete or cancelled; it simply has no effect.
+    future that is already complete or cancelled; it simply has no effect.
 
     Returns the `$future'.
 
@@ -413,9 +444,9 @@ USER METHODS
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and
     return a new future whose readiness somehow depends on the readiness of
-    those components. The first component future will be used as the
-    prototype for constructing the return value, so it respects subclassing
-    correctly.
+    those components. The first non-immediate component future will be used
+    as the prototype for constructing the return value, so it respects
+    subclassing correctly.
 
   $future = Future->wait_all( @subfutures )
     Returns a new `Future' instance that will indicate it is ready once all
@@ -424,7 +455,7 @@ DEPENDENT FUTURES
     futures.
 
     When given an empty list this constructor returns a new immediately-done
-    Future.
+    future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -437,7 +468,7 @@ DEPENDENT FUTURES
     first component future that was ready; either success or failure.
 
     When given an empty list this constructor returns an immediately-failed
-    Future.
+    future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -455,7 +486,7 @@ DEPENDENT FUTURES
     access each component future's results individually, use `done_futures'.
 
     When given an empty list this constructor returns a new immediately-done
-    Future.
+    future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
@@ -472,14 +503,14 @@ DEPENDENT FUTURES
     component future to fail. To access the other failures, use
     `failed_futures'.
 
-    Normally when this Future completes successfully, only one of its
+    Normally when this future completes successfully, only one of its
     component futures will be done. If it is constructed with multiple that
     are already done however, then all of these will be returned from
     `done_futures'. Users should be careful to still check all the results
     from `done_futures' in that case.
 
     When given an empty list this constructor returns an immediately-failed
-    Future.
+    future.
 
     This constructor would primarily be used by users of asynchronous
     interfaces.
