@@ -1,5 +1,13 @@
 Revision history for Future
 
+0.18    2013/09/20 19:09:57
+        [CHANGES]
+         * Added 'try_repeat' and 'try_repeat_until_success' aliases
+         * @CARP_NOT trust between Future and Future::Utils
+
+        [BUGFIXES]
+         * Fix to concurrent non-immediate + immediate fmap* return values
+
 0.17    2013/09/07 16:53:47
         [CHANGES]
          * Performance improvement by using direct member access instead of

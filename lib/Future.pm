@@ -8,10 +8,12 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
+
+our @CARP_NOT = qw( Future::Utils );
 
 use constant DEBUG => $ENV{PERL_FUTURE_DEBUG};
 

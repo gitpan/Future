@@ -8,12 +8,13 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 use Exporter 'import';
 
 our @EXPORT_OK = qw(
    repeat
+   try_repeat try_repeat_until_success
    repeat_until_success
 
    fmap fmap_concat
@@ -22,6 +23,7 @@ our @EXPORT_OK = qw(
 );
 
 use Carp;
+our @CARP_NOT = qw( Future );
 
 =head1 NAME
 
@@ -29,7 +31,7 @@ C<Future::Utils> - utility functions for working with C<Future> objects
 
 =head1 SYNOPSIS
 
- use Future::Utils qw( repeat );
+ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 
  my $eventual_f = repeat {
     my $trial_f = ...
@@ -47,18 +49,24 @@ C<Future::Utils> - utility functions for working with C<Future> objects
     return $trial_f;
  } foreach => \@items;
 
- my $eventual_f = repeat_until_success {
+ my $eventual_f = try_repeat {
+    my $trial_f = ...
+    return $trial_f;
+ } while => sub { ... };
+
+ my $eventual_f = try_repeat_until_success {
     ...
     return $trial_f;
  };
 
- my $eventual_f = repeat_until_success {
+ my $eventual_f = try_repeat_until_success {
     my $item = shift;
     ...
     return $trial_f;
  } foreach => \@items;
 
 Z<>
+ use Future::Utils qw( fmap fmap1 fmap_void );
 
  my $result_f = fmap {
     my $item = shift;
@@ -275,24 +283,44 @@ sub repeat(&@)
    return $future;
 }
 
-=head2 $future = repeat_until_success { CODE } ...
+=head2 $future = try_repeat { CODE } ...
 
-A shortcut to calling C<repeat> with an ending condition that simply tests for
-a successful result from a future. May be combined with C<foreach> or
-C<generate>.
+Currently a simple alias to C<repeat>. However, in some later version the
+C<repeat> function will be changed so that if a trial future fails, then the
+eventual future will immediately fail as well, making its semantics a little
+closer to that of a C<while {}> loop in Perl. Code that specifically wishes
+to catch failures in trial futures and retry the block should use
+C<try_repeat> specifically.
 
 =cut
 
-sub repeat_until_success(&@)
+*try_repeat = \&repeat;
+
+=head2 $future = try_repeat_until_success { CODE } ...
+
+A shortcut to calling C<try_repeat> with an ending condition that simply tests
+for a successful result from a future. May be combined with C<foreach> or
+C<generate>.
+
+This function used to be called C<repeat_until_success>, and is currently
+aliased as this name as well.
+
+=cut
+
+sub try_repeat_until_success(&@)
 {
    my $code = shift;
    my %args = @_;
 
+   # TODO: maybe merge while/until conditions one day...
    defined($args{while}) or defined($args{until})
-      and croak "Cannot pass 'while' or 'until' to repeat_until_success";
+      and croak "Cannot pass 'while' or 'until' to try_repeat_until_success";
 
-   repeat \&$code, while => sub { shift->failure }, %args;
+   try_repeat( $code, while => sub { shift->failure }, %args );
 }
+
+# Legacy name
+*repeat_until_success = \&try_repeat_until_success;
 
 =head1 APPLYING A FUNCTION TO A LIST
 
@@ -356,17 +384,24 @@ below.
 
 =cut
 
+# This function is invoked in two circumstances:
+#  a) to create an item Future in a slot,
+#  b) once a non-immediate item Future is complete, to check its results
+# It can tell which circumstance by whether the slot itself is defined or not
 sub _fmap_slot
 {
    my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $return ) = @_;
 
    while(1) {
       unless( $slots->[$idx] ) {
+         # No item Future yet (case a), so create one
          my $item;
          unless( ( $item ) = $generator->() ) {
+            # All out of items, so now just wait for the slots to be finished
             undef $slots->[$idx];
-            defined and return for @$slots;
+            defined and return $return for @$slots;
 
+            # All the slots are done
             $return ||= Future->new;
 
             $return->done( @$results );
@@ -388,6 +423,7 @@ sub _fmap_slot
 
       my $f = $slots->[$idx];
 
+      # Slot is non-immediate; arrange for us to be invoked again later when it's ready
       if( !$f->is_ready ) {
          $args[-1] = ( $return ||= $f->new );
          $f->on_done( sub { _fmap_slot( @args ) } );
@@ -395,6 +431,8 @@ sub _fmap_slot
          return $return;
       }
 
+      # Either we've been invoked again (case b), or the immediate Future was
+      # already ready.
       if( $f->failure ) {
          $return ||= $f->new;
          $return->fail( $f->failure );

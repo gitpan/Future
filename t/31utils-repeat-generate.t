@@ -6,7 +6,7 @@ use warnings;
 use Test::More;
 
 use Future;
-use Future::Utils qw( repeat repeat_until_success );
+use Future::Utils qw( repeat );
 
 # generate without otherwise
 {

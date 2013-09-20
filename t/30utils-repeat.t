@@ -7,7 +7,7 @@ use Test::More;
 use Test::Identity;
 
 use Future;
-use Future::Utils qw( repeat repeat_until_success );
+use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 
 {
    my $trial_f;
@@ -123,9 +123,25 @@ use Future::Utils qw( repeat repeat_until_success );
    is( $future->failure, "Expected code to return a Future", 'repeat failure for non-Future return' );
 }
 
+# try_repeat catches failures
 {
    my $attempt = 0;
-   my $future = repeat_until_success {
+   my $future = try_repeat {
+      if( ++$attempt < 3 ) {
+         return FUture->new->fail( "Too low" );
+      }
+      else {
+         return Future->new->done( $attempt );
+      }
+   } while => sub { shift->failure };
+
+   ok( $future->is_ready, '$future is now ready for try_repeat' );
+   is( scalar $future->get, 3, '$future->get' );
+}
+
+{
+   my $attempt = 0;
+   my $future = try_repeat_until_success {
       if( ++$attempt < 3 ) {
          return Future->new->fail( "Too low" );
       }
@@ -134,7 +150,7 @@ use Future::Utils qw( repeat repeat_until_success );
       }
    };
 
-   ok( $future->is_ready, '$future is now ready for repeat_until_success' );
+   ok( $future->is_ready, '$future is now ready for try_repeat_until_success' );
    is( scalar $future->get, 3, '$future->get' );
 }
 

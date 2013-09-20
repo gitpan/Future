@@ -6,7 +6,7 @@ use warnings;
 use Test::More;
 
 use Future;
-use Future::Utils qw( repeat repeat_until_success );
+use Future::Utils qw( repeat try_repeat_until_success );
 
 # foreach without otherwise
 {
@@ -99,9 +99,9 @@ use Future::Utils qw( repeat repeat_until_success );
    is( scalar $future->get, 2, '$future->get returns successful result from while + otherwise' );
 }
 
-# repeat_until_success foreach
+# try_repeat_until_success foreach
 {
-   my $future = repeat_until_success {
+   my $future = try_repeat_until_success {
       my $arg = shift;
       if( $arg eq "bad" ) {
          return Future->new->fail( "bad" );
@@ -111,7 +111,7 @@ use Future::Utils qw( repeat repeat_until_success );
       }
    } foreach => [qw( bad good not-attempted )];
 
-   is( scalar $future->get, "good", '$future->get returns correct result for repeat_until_success' );
+   is( scalar $future->get, "good", '$future->get returns correct result for try_repeat_until_success' );
 }
 
 # main code dies

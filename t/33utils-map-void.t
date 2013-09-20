@@ -89,6 +89,20 @@ use Future::Utils qw( fmap_void );
    ok( $future->is_ready, '$future already ready for fmap on immediates' );
 }
 
+# fmap_void on non/immediate mix
+{
+   my @item_f = ( my $item = Future->new, Future->new->done, Future->new->done );
+   my $future = fmap_void {
+      return $_[0];
+   } foreach => \@item_f,
+     concurrent => 2;
+
+   ok( !$future->is_ready, '$future not yet ready before non-immediate done' );
+
+   $item->done;
+   ok( $future->is_ready, '$future now ready after non-immediate done' );
+}
+
 # fmap_void fail
 {
    my @subf;
