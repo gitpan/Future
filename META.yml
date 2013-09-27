@@ -17,10 +17,10 @@ name: Future
 provides:
   Future:
     file: lib/Future.pm
-    version: 0.18
+    version: 0.19
   Future::Utils:
     file: lib/Future/Utils.pm
-    version: 0.18
+    version: 0.19
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.18
+version: 0.19

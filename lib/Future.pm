@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.18';
+our $VERSION = '0.19';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -987,9 +987,11 @@ sub _new_dependent
 
    $self->{subs} = $subs;
 
+   # This might be called by a DESTROY during global destruction so it should
+   # be as defensive as possible (see RT88967)
    $self->on_cancel( sub {
       foreach my $sub ( @$subs ) {
-         $sub->cancel if !$sub->{ready};
+         $sub->cancel if $sub and !$sub->{ready};
       }
    } );
 

@@ -1,5 +1,10 @@
 Revision history for Future
 
+0.19    2013/09/27 13:31:16
+        [BUGFIXES]
+         * Guard against odd things happening during ->cancel at global
+           destruction (RT88967)
+
 0.18    2013/09/20 19:09:57
         [CHANGES]
          * Added 'try_repeat' and 'try_repeat_until_success' aliases
