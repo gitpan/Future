@@ -1,5 +1,15 @@
 Revision history for Future
 
+0.20    2013/11/18 19:14:27
+        [CHANGES]
+         * Include an indication of done/failed/cancelled status of a Future
+           when ->done or ->failing an already-ready one
+
+        [BUGFIXES]
+         * Declare requires perl 5.8 because it fails on 5.6 smokers - no idea
+           why
+         * Fix a couple of typoes in docs (RT89185)
+
 0.19    2013/09/27 13:31:16
         [BUGFIXES]
          * Guard against odd things happening during ->cancel at global

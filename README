@@ -28,7 +28,7 @@ DESCRIPTION
     required. These are called "dependent" futures here, and are returned by
     the various `wait_*' and `need_*' constructors.
 
-    It is intended that library functions that perform asynchonous
+    It is intended that library functions that perform asynchronous
     operations would use future objects to represent outstanding operations,
     and allow their calling programs to control or wait for these operations
     to complete. The implementation and the user of such an interface would
@@ -234,7 +234,7 @@ CONSTRUCTORS
     no arguments this will be a trivial wrapper; `$future' will complete or
     fail when `$f1' does, and `$f1' will be cancelled when `$future' is.
 
-    By passing the following named argmuents, the returned `$future' can be
+    By passing the following named arguments, the returned `$future' can be
     made to behave differently to `$f1':
 
     done => CODE

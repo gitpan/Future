@@ -8,7 +8,7 @@ package Future;
 use strict;
 use warnings;
 
-our $VERSION = '0.19';
+our $VERSION = '0.20';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -50,7 +50,7 @@ ready depending on the readiness of their component futures as required. These
 are called "dependent" futures here, and are returned by the various C<wait_*>
 and C<need_*> constructors.
 
-It is intended that library functions that perform asynchonous operations
+It is intended that library functions that perform asynchronous operations
 would use future objects to represent outstanding operations, and allow their
 calling programs to control or wait for these operations to complete. The
 implementation and the user of such an interface would typically make use of
@@ -452,7 +452,7 @@ Returns a new C<Future> instance that wraps the one given as C<$f1>. With no
 arguments this will be a trivial wrapper; C<$future> will complete or fail
 when C<$f1> does, and C<$f1> will be cancelled when C<$future> is.
 
-By passing the following named argmuents, the returned C<$future> can be made
+By passing the following named arguments, the returned C<$future> can be made
 to behave differently to C<$f1>:
 
 =over 8
@@ -530,6 +530,15 @@ sub _mark_ready
    }
 }
 
+sub _state
+{
+   my $self = shift;
+   return !$self->{ready}     ? "pending" :
+           $self->{failure}   ? "failed" :
+           $self->{cancelled} ? "cancelled" :
+                                "done";
+}
+
 =head1 IMPLEMENTATION METHODS
 
 These methods would primarily be used by implementations of asynchronous
@@ -553,7 +562,7 @@ sub done
 {
    my $self = shift;
 
-   $self->{ready} and Carp::croak "$self is already complete and cannot be ->done twice";
+   $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->done";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
    $self->{result} = [ @_ ];
    $self->_mark_ready;
@@ -600,7 +609,7 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
-   $self->{ready} and Carp::croak "$self is already complete and cannot be ->fail'ed";
+   $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->fail'ed";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or Carp::croak "$self ->fail requires an exception that is true";
    $self->{failure} = [ $exception, @details ];
