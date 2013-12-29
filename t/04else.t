@@ -1,0 +1,200 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Test::More;
+use Test::Fatal;
+use Test::Refcount;
+use Test::Identity;
+
+use Future;
+
+# else success
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->else(
+      sub { die "else of successful Future should not be invoked" }
+   );
+
+   ok( defined $fseq, '$fseq defined' );
+   isa_ok( $fseq, "Future", '$fseq' );
+
+   # Two refs; one in lexical $fseq, one via $f1
+   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+
+   $f1->done( results => "here" );
+
+   is_deeply( [ $fseq->get ], [ results => "here" ], '$fseq succeeds when $f1 succeeds' );
+
+   undef $f1;
+   is_oneref( $fseq, '$fseq has refcount 1 before EOF' );
+}
+
+# else failure
+{
+   my $f1 = Future->new;
+
+   my $f2;
+   my $fseq = $f1->else(
+      sub {
+         is( $_[0], "f1 failure\n", 'then fail block passed result of $f1' );
+         return $f2 = Future->new;
+      }
+   );
+
+   ok( defined $fseq, '$fseq defined' );
+   isa_ok( $fseq, "Future", '$fseq' );
+
+   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+
+   ok( !$f2, '$f2 not yet defined before $f1 fails' );
+
+   $f1->fail( "f1 failure\n" );
+
+   undef $f1;
+   is_refcount( $fseq, 2, '$fseq has refcount 2 after $f1 fail and dropped' );
+
+   ok( defined $f2, '$f2 now defined after $f1 fails' );
+
+   ok( !$fseq->is_ready, '$fseq not yet done before $f2 done' );
+
+   $f2->done( results => "here" );
+
+   ok( $fseq->is_ready, '$fseq is done after $f2 done' );
+   is_deeply( [ $fseq->get ], [ results => "here" ], '$fseq->get returns results' );
+
+   undef $f2;
+   is_oneref( $fseq, '$fseq has refcount 1 before EOF' );
+}
+
+# Double failure
+{
+   my $f1 = Future->new;
+
+   my $f2;
+   my $fseq = $f1->else(
+      sub { return $f2 = Future->new }
+   );
+
+   $f1->fail( "First failure\n" );
+   $f2->fail( "Another failure\n" );
+
+   is( scalar $fseq->failure, "Another failure\n", '$fseq fails when $f2 fails' );
+}
+
+# code dies
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->else( sub {
+      die "It fails\n";
+   } );
+
+   ok( !defined exception { $f1->fail( "bork" ) }, 'exception not propagated from fail call' );
+
+   ok( $fseq->is_ready, '$fseq is ready after code exception' );
+   is( scalar $fseq->failure, "It fails\n", '$fseq->failure after code exception' );
+}
+
+# immediate fail
+{
+   my $f1 = Future->new->fail( "Failure\n" );
+
+   my $f2;
+   my $fseq = $f1->else(
+      sub { return $f2 = Future->new }
+   );
+
+   ok( defined $f2, '$f2 defined for immediate fail' );
+
+   $f2->fail( "Another failure\n" );
+
+   ok( $fseq->is_ready, '$fseq already ready for immediate fail' );
+   is( scalar $fseq->failure, "Another failure\n", '$fseq->failure for immediate fail' );
+}
+
+# immediate done
+{
+   my $f1 = Future->new->done( "It works" );
+
+   my $fseq = $f1->else(
+      sub { die "else block invoked for immediate done Future" }
+   );
+
+   ok( $fseq->is_ready, '$fseq already ready for immediate done' );
+   is( scalar $fseq->get, "It works", '$fseq->get for immediate done' );
+}
+
+# else cancel
+{
+   my $f1 = Future->new;
+   my $fseq = $f1->else( sub { die "else of cancelled Future should not be invoked" } );
+
+   $fseq->cancel;
+
+   ok( $f1->is_cancelled, '$f1 is cancelled by $fseq cancel' );
+
+   $f1 = Future->new;
+   my $f2;
+   $fseq = $f1->else( sub { return $f2 = Future->new } );
+
+   $f1->fail( "A failure\n" );
+   $fseq->cancel;
+
+   ok( $f2->is_cancelled, '$f2 cancelled by $fseq cancel' );
+}
+
+# Void context raises a warning
+{
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
+
+   Future->new->done->else(
+      sub { Future->new }
+   );
+   like( $warnings,
+         qr/^Calling ->else in void context /,
+         'Warning in void context' );
+}
+
+# Non-Future return raises exception
+{
+   my $f1 = Future->new;
+
+   my $file = __FILE__;
+   my $line = __LINE__+1;
+   my $fseq = $f1->else( sub {} );
+
+   like( exception { $f1->fail( "failed\n" ) },
+       qr/^Expected __ANON__\(\Q$file\E line $line\) to return a Future/,
+       'Exception from non-Future return' );
+}
+
+# else_with_f
+{
+   my $f1 = Future->new;
+
+   my $f2;
+   my $fseq = $f1->else_with_f(
+      sub {
+         identical( $_[0], $f1, 'else_with_f block passed $f1' );
+         is( $_[1], "f1 failure\n", 'else_with_f block pased failure of $f1' );
+         return $f2 = Future->new;
+      }
+   );
+
+   ok( defined $fseq, '$fseq defined' );
+
+   $f1->fail( "f1 failure\n" );
+
+   ok( defined $f2, '$f2 defined after $f1->fail' );
+
+   $f2->done( "f2 result" );
+
+   ok( $fseq->is_ready, '$fseq is done after $f2 done' );
+   is( scalar $fseq->get, "f2 result", '$fseq->get returns results' );
+}
+
+done_testing;

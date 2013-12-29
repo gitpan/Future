@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.20';
+our $VERSION = '0.21';
 
 use Exporter 'import';
 
@@ -193,6 +193,7 @@ sub _repeat
          # defer
          $return ||= $trial->new;
          $trial->on_ready( sub {
+            return if $$trialp->is_cancelled;
             _repeat( $code, $return, $trialp, $cond, $sense );
          });
          return $return;

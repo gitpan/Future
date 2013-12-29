@@ -69,19 +69,6 @@ C<then> method.
  my $f = F_INNER()
     ->then( sub { F_OUTER( @_ ) } );
 
-Alternatively, when using the C<and_then> method, the result can be obtained
-by calling the C<get> method on it, as it is passed as the only argument to
-the code block.
-
- my $f = F_INNER()
-    ->and_then( sub {
-       my $f_inner = shift;
-       F_OUTER( $f_inner->get );
-    });
-
-This form is usually more convenient in cases where the code block might want
-to simply return the initial future.
-
 =head1 CONDITIONALS
 
 It may be that the result of one function call is used to determine whether or
@@ -91,14 +78,14 @@ not another operation is taken.
     ACTION();
  }
 
-Because the C<and_then> code block is given the first future, and is expected
-to return a future, it can decide whether to call the second function to
-return a new future, or simply return the one it was given.
+Because the C<then_with_f> code block is given the first future in addition to
+its results it can decide whether to call the second function to return a new
+future, or simply return the one it was given.
 
  my $f = F_COND()
-    ->and_then( sub {
-       my $f_cond = shift;
-       if( $f_cond->get == $value ) {
+    ->then_with_f( sub {
+       my ( $f_cond, $result ) = @_;
+       if( $result == $value ) {
           return F_ACTION();
        }
        else {
@@ -157,13 +144,13 @@ but rethrow it further up.
  };
 
 In this case, while the C<else> block could return a new C<Future> failed with
-the same exception, the C<or_else> block is passed the failed C<Future> itself
-so it can just return that.
+the same exception, the C<else_with_f> block is passed the failed C<Future>
+itself in addition to the failure details so it can just return that.
 
  my $f = F_FIRST()
-    ->or_else( sub {
-       my $f1 = shift;
-       ERROR( $f1->failure );
+    ->else_with_f( sub {
+       my ( $f1, @failure ) = @_;
+       ERROR( @failure );
        return $f1;
     });
 

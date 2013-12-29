@@ -7,11 +7,13 @@ package Future;
 
 use strict;
 use warnings;
+no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.20';
+our $VERSION = '0.21';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
+use B qw( svref_2object );
 
 our @CARP_NOT = qw( Future::Utils );
 
@@ -166,12 +168,45 @@ interfaces.
 
 =cut
 
+# Callback flags
+use constant {
+   CB_DONE   => 1<<0, # Execute callback on done
+   CB_FAIL   => 1<<1, # Execute callback on fail
+   CB_CANCEL => 1<<2, # Execute callback on cancellation
+
+   CB_SELF   => 1<<3, # Pass $self as first argument
+   CB_RESULT => 1<<4, # Pass result/failure as a list
+
+   CB_SEQ_ONDONE => 1<<5, # Sequencing on success (->then)
+   CB_SEQ_ONFAIL => 1<<6, # Sequencing on failure (->else)
+};
+
+use constant CB_ALWAYS => CB_DONE|CB_FAIL|CB_CANCEL;
+
+# Useful for identifying CODE references
+sub CvNAME_FILE_LINE
+{
+   my ( $code ) = @_;
+   my $cv = svref_2object( $code );
+
+   my $name = join "::", $cv->STASH->NAME, $cv->GV->NAME;
+   return $name unless $cv->GV->NAME eq "__ANON__";
+
+   # $cv->GV->LINE isn't reliable, as outside of perl -d mode all anon CODE
+   # in the same file actually shares the same GV. :(
+   # Walk the optree looking for the first COP
+   my $cop = $cv->START;
+   $cop = $cop->next while $cop and ref $cop ne "B::COP";
+
+   sprintf "%s(%s line %d)", $cv->GV->NAME, $cop->file, $cop->line;
+}
+
 sub new
 {
    my $proto = shift;
    return bless {
       ready     => 0,
-      callbacks => [],
+      callbacks => [], # [] = [$type, ...]
       ( DEBUG ? ( constructed_at => join " line ", (caller)[1,2] ) : () ),
    }, ( ref $proto || $proto );
 }
@@ -240,261 +275,6 @@ sub call
    return $f;
 }
 
-=head2 $future = $f1->followed_by( \&code )
-
-Returns a new C<Future> instance that allows a sequence of operations to be
-performed. Once C<$f1> is ready, the code reference will be invoked and is
-passed one argument, being C<$f1>. It should return a future, C<$f2>. Once
-C<$f2> indicates completion the combined future C<$future> will then be marked
-as complete, with whatever result C<$f2> gave.
-
- $f2 = $code->( $f1 )
-
-If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
-cancelled. If it is cancelled after completion then C<$f2> is cancelled
-instead.
-
-If the C<$code> block dies entirely and throws an exception, this will be
-caught and set as the failure for the returned C<$fseq>. The exception will
-not be propagated to the caller of the method that caused C<$f1> to be ready.
-
-As it is always a mistake to call this method in void context and lose the
-reference to the returned future (because exception/error handling would be
-silently dropped), this method warns in void context.
-
-=cut
-
-sub followed_by
-{
-   my $f1 = shift;
-   my ( $code ) = @_;
-
-   # For later, we might want to know where we were called from
-   my $func = "followed_by";
-   $func = (caller 1)[3] and $func =~ s/^.*::// if caller eq __PACKAGE__;
-   my $where = Carp::shortmess "in $func";
-
-   my $fseq;
-   # Only clone $f1 if it's not immediately done. If it is done, we know that
-   # on_ready will definitely run so we can initialise it there as $f2 instead.
-   $fseq = $f1->new if !$f1->is_ready;
-
-   my $f2;
-
-   $f1->on_ready( sub {
-      my $self = shift;
-
-      return if $self->{cancelled};
-
-      unless( eval { $f2 = $code->( $self ); 1 } ) {
-         $fseq ||= Future->new;
-         $fseq->fail( $@ );
-         return;
-      }
-
-      unless( blessed $f2 and $f2->isa( "Future" ) ) {
-         die "Expected code to return a Future $where";
-      }
-
-      # If $f1 was immediate, we might as well just return $f2
-      $fseq = $f2, return unless $fseq;
-
-      $f2->on_ready( sub {
-         my $f2 = shift;
-         if( $f2->{cancelled} ) {
-            return;
-         }
-         elsif( $f2->{failure} ) {
-            $fseq->fail( $f2->failure );
-         }
-         else {
-            $fseq->done( $f2->get );
-         }
-      } );
-   } );
-
-   $fseq->on_cancel( sub {
-      ( $f2 || $f1 )->cancel
-   } ) if not $fseq->{ready} and not $f2;
-
-   if( !defined wantarray ) {
-      Carp::carp "Calling ->$func in void context";
-   }
-
-   return $fseq;
-}
-
-=head2 $future = $f1->and_then( \&code )
-
-A convenient shortcut to C<followed_by>, which invokes the supplied code
-reference only if the first future completes successfully. If it fails, then
-the returned future will fail with the same error and the code reference will
-not be invoked.
-
-=cut
-
-sub and_then
-{
-   my $self = shift;
-   my ( $code ) = @_;
-
-   return $self->followed_by( sub {
-      my $self = shift;
-      return $self if $self->{failure};
-      return $code->( $self );
-   });
-}
-
-=head2 $future = $f1->or_else( \&code )
-
-A convenient shortcut to C<followed_by>, which invokes the supplied code
-reference only if the first future fails. If it completes successfully, then
-the returned future will complete with the same result and the code reference
-will not be invoked.
-
-=cut
-
-sub or_else
-{
-   my $self = shift;
-   my ( $code ) = @_;
-
-   return $self->followed_by( sub {
-      my $self = shift;
-      return $self if not $self->{failure};
-      return $code->( $self );
-   });
-}
-
-=head2 $future = $f1->then( \&done_code )
-
-Returns a new C<Future> instance that allows a sequence of operations to be
-performed similar to C<and_then>, except that the code reference is passed
-the result of C<$f1> rather than C<$f1> itself.
-
-If C<$f1> completes successfully, its result it passed into the C<$done_code>
-function, which should return a new C<Future> whose result will be used to set
-the result of the overall C<$future>. If C<$f1> fails this failure is used to
-set the result of C<$future> directly.
-
- $f2 = $done_code->( @result )
-
-If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
-cancelled. If it is cancelled after completion then C<$f2> is cancelled
-instead.
-
-This is more convenient than C<and_then> in the likely case that the code
-block does not need the initial future object itself, only the result.
-
-=head2 $future = $f1->else( \&fail_code )
-
-Returns a new C<Future> instance that allows a sequence of operations to be
-performed similar to C<or_else>, except that the code reference is passed the
-failure of C<$f1> rather than C<$1> itself.
-
-If C<$f1> fails, its failure is passed into the C<$fail_code> function, which
-should return a new C<Future> whose result will be used to set the result of
-the overall C<$future>. If C<$f1> completes successful this result is used to
-set the result of C<$future> directly.
-
- $f2 = $fail_code->( $exception, @details )
-
-If C<$future> is cancelled before C<$f1> completes, then C<$f1> will be
-cancelled. If it is cancelled after completion then C<$f2> is cancelled
-instead.
-
-This is more convenient than C<or_else> in the likely case that the code
-block does not need the initial future object itself, only the failure.
-
-=head2 $future = $f1->then( \&done_code, \&fail_code )
-
-The C<then> method can also be passed the C<$fail_code> block as well, giving
-a combination of C<then> and C<else> behaviour.
-
-This operation is designed to be compatible with the semantics of other future
-systems, such as Javascript's Q or Promises/A libraries.
-
-=cut
-
-sub then
-{
-   my $self = shift;
-   my ( $done_code, $fail_code ) = @_;
-
-   return $self->followed_by( sub {
-      my $self = shift;
-      if( !$self->{failure} ) {
-         return $self unless $done_code;
-         return $done_code->( $self->get );
-      }
-      else {
-         return $self unless $fail_code;
-         return $fail_code->( $self->failure );
-      }
-   } );
-}
-
-sub else
-{
-   my $self = shift;
-   my ( $fail_code ) = @_;
-
-   return $self->followed_by( sub {
-      my $self = shift;
-      return $self unless $self->{failure};
-      return $fail_code->( $self->failure );
-   } );
-}
-
-=head2 $future = $f1->transform( %args )
-
-Returns a new C<Future> instance that wraps the one given as C<$f1>. With no
-arguments this will be a trivial wrapper; C<$future> will complete or fail
-when C<$f1> does, and C<$f1> will be cancelled when C<$future> is.
-
-By passing the following named arguments, the returned C<$future> can be made
-to behave differently to C<$f1>:
-
-=over 8
-
-=item done => CODE
-
-Provides a function to use to modify the result of a successful completion.
-When C<$f1> completes successfully, the result of its C<get> method is passed
-into this function, and whatever it returns is passed to the C<done> method of
-C<$future>
-
-=item fail => CODE
-
-Provides a function to use to modify the result of a failure. When C<$f1>
-fails, the result of its C<failure> method is passed into this function, and
-whatever it returns is passed to the C<fail> method of C<$future>.
-
-=back
-
-=cut
-
-sub transform
-{
-   my $self = shift;
-   my %args = @_;
-
-   my $xfrm_done = $args{done};
-   my $xfrm_fail = $args{fail};
-
-   return $self->followed_by( sub {
-      my $self = shift;
-      if( !$self->{failure} ) {
-         return $self unless $xfrm_done;
-         return $self->new->done( $xfrm_done->( $self->get ) );
-      }
-      else {
-         return $self unless $xfrm_fail;
-         return $self->new->fail( $xfrm_fail->( $self->failure ) );
-      }
-   });
-}
-
 sub _mark_ready
 {
    my $self = shift;
@@ -503,29 +283,65 @@ sub _mark_ready
    delete $self->{on_cancel};
    my $callbacks = delete $self->{callbacks} or return;
 
-   my $fail = defined $self->{failure};
-   my $done = !$fail && !$self->{cancelled};
+   my $cancelled = $self->{cancelled};
+   my $fail      = defined $self->{failure};
+   my $done      = !$fail && !$cancelled;
 
-   my @result  = $done ? $self->get : ();
-   my @failure = $fail ? $self->failure : ();
+   my @result  = $done ? $self->get :
+                 $fail ? $self->failure :
+                         ();
 
    foreach my $cb ( @$callbacks ) {
-      my ( $type, $code ) = @$cb;
+      my ( $flags, $code ) = @$cb;
       my $is_future = blessed( $code ) && $code->isa( "Future" );
 
-      if( $type eq "ready" ) {
-         $is_future ? ( $done ? $code->done( @result ) :
-                        $fail ? $code->fail( @failure ) :
-                                $code->cancel )
-                    : $code->( $self );
+      next if $done      and not( $flags & CB_DONE );
+      next if $fail      and not( $flags & CB_FAIL );
+      next if $cancelled and not( $flags & CB_CANCEL );
+
+      if( $is_future ) {
+         $done ? $code->done( @result ) :
+         $fail ? $code->fail( @result ) :
+                 $code->cancel;
       }
-      elsif( $type eq "done" and $done ) {
-         $is_future ? $code->done( @result ) 
-                    : $code->( @result );
+      elsif( $flags & (CB_SEQ_ONDONE|CB_SEQ_ONFAIL) ) {
+         my ( undef, undef, $fseq ) = @$cb;
+
+         my $f2;
+         if( $done and $flags & CB_SEQ_ONDONE or
+             $fail and $flags & CB_SEQ_ONFAIL ) {
+            my @args = (
+               ( $flags & CB_SELF   ? $self : () ),
+               ( $flags & CB_RESULT ? @result : () ),
+            );
+
+            unless( eval { $f2 = $code->( @args ); 1 } ) {
+               $fseq->fail( $@ );
+               next;
+            }
+
+            unless( blessed $f2 and $f2->isa( "Future" ) ) {
+               die "Expected " . CvNAME_FILE_LINE($code) . " to return a Future\n";
+            }
+
+            $fseq->on_cancel( $f2 );
+         }
+         else {
+            $f2 = $self;
+         }
+
+         if( $f2->is_ready ) {
+            $f2->on_ready( $fseq ) if !$f2->{cancelled};
+         }
+         else {
+            push @{ $f2->{callbacks} }, [ CB_DONE|CB_FAIL, $fseq ];
+         }
       }
-      elsif( $type eq "failed" and $fail ) {
-         $is_future ? $code->fail( @failure )
-                    : $code->( @failure );
+      else {
+         $code->(
+            ( $flags & CB_SELF   ? $self : () ),
+            ( $flags & CB_RESULT ? @result : () ),
+         );
       }
    }
 }
@@ -645,7 +461,7 @@ Returns the C<$future>.
 
 =cut
 
-sub die
+sub die :method
 {
    my $self = shift;
    my ( $exception, @details ) = @_;
@@ -759,10 +575,23 @@ sub on_ready
                  : $code->( $self );
    }
    else {
-      push @{ $self->{callbacks} }, [ ready => $code ];
+      push @{ $self->{callbacks} }, [ CB_ALWAYS|CB_SELF, $code ];
    }
 
    return $self;
+}
+
+=head2 $done = $future->is_done
+
+Returns true on a future if it is ready and completed successfully. Returns
+false if it is still pending, failed, or was cancelled.
+
+=cut
+
+sub is_done
+{
+   my $self = shift;
+   return $self->{ready} && !$self->{failure} && !$self->{cancelled};
 }
 
 =head2 @result = $future->get
@@ -838,7 +667,7 @@ sub on_done
                  : $code->( $self->get );
    }
    else {
-      push @{ $self->{callbacks} }, [ done => $code ];
+      push @{ $self->{callbacks} }, [ CB_DONE|CB_RESULT, $code ];
    }
 
    return $self;
@@ -916,7 +745,7 @@ sub on_fail
                  : $code->( $self->failure );
    }
    else {
-      push @{ $self->{callbacks} }, [ failed => $code ];
+      push @{ $self->{callbacks} }, [ CB_FAIL|CB_RESULT, $code ];
    }
 
    return $self;
@@ -966,6 +795,290 @@ sub cancel_cb
 {
    my $self = shift;
    return sub { $self->cancel };
+}
+
+=head1 SEQUENCING METHODS
+
+The following methods all return a new future to represent the combination of
+its invocant followed by another action given by a code reference. The
+combined activity waits for the first future to be ready, then may invoke the
+code depending on the success or failure of the first, or may run it
+regardless. The returned sequence future represents the entire combination of
+activity.
+
+In some cases the code should return a future; in some it should return an
+immediate result. If a future is returned, the combined future will then wait
+for the result of this second one. If the combinined future is cancelled, it
+will cancel either the first future or the second, depending whether the first
+had completed. If the code block throws an exception instead of returning a
+value, the sequence future will fail with that exception as its message and no
+further values.
+
+As it is always a mistake to call these sequencing methods in void context and lose the
+reference to the returned future (because exception/error handling would be
+silently dropped), this method warns in void context.
+
+=cut
+
+sub _sequence
+{
+   my $f1 = shift;
+   my ( $code, $flags ) = @_;
+
+   # For later, we might want to know where we were called from
+   my $func = (caller 1)[3];
+   $func =~ s/^.*:://;
+
+   if( !defined wantarray ) {
+      Carp::carp "Calling ->$func in void context";
+   }
+
+   if( $f1->is_ready ) {
+      # Take a shortcut
+      return $f1 if $f1->is_done and not( $flags & CB_SEQ_ONDONE ) or
+                    $f1->failure and not( $flags & CB_SEQ_ONFAIL );
+
+      my @args = (
+         ( $flags & CB_SELF ? $f1 : () ),
+         ( $flags & CB_RESULT ? $f1->is_done ? $f1->get :
+                                $f1->failure ? $f1->failure :
+                                               () : () ),
+      );
+
+      my $fseq;
+      unless( eval { $fseq = $code->( @args ); 1 } ) {
+         return Future->new->fail( $@ );
+      }
+
+      unless( blessed $fseq and $fseq->isa( "Future" ) ) {
+         die "Expected " . CvNAME_FILE_LINE($code) . " to return a Future\n";
+      }
+
+      return $fseq;
+   }
+
+   my $fseq = $f1->new;
+   $fseq->on_cancel( $f1 );
+
+   push @{ $f1->{callbacks} }, [ CB_DONE|CB_FAIL|$flags, $code, $fseq ];
+
+   return $fseq;
+}
+
+=head2 $future = $f1->then( \&done_code )
+
+Returns a new sequencing C<Future> that runs the code if the first succeeds.
+Once C<$f1> succeeds the code reference will be invoked and is passed the list
+of results. It should return a future, C<$f2>. Once C<$f2> completes the
+sequence future will then be marked as complete with whatever result C<$f2>
+gave. If C<$f1> fails then the sequence future will immediately fail with the
+same failure and the code will not be invoked.
+
+ $f2 = $done_code->( @result )
+
+=head2 $future = $f1->else( \&fail_code )
+
+Returns a new sequencing C<Future> that runs the code if the first fails. Once
+C<$f1> fails the code reference will be invoked and is passed the failure and
+details. It should return a future, C<$f2>. Once C<$f2> completes the sequence
+future will then be marked as complete with whatever result C<$f2> gave. If
+C<$f1> succeeds then the sequence future will immediately succeed with the
+same result and the code will not be invoked.
+
+ $f2 = $fail_code->( $exception, @details )
+
+=head2 $future = $f1->then( \&done_code, \&fail_code )
+
+The C<then> method can also be passed the C<$fail_code> block as well, giving
+a combination of C<then> and C<else> behaviour.
+
+This operation is designed to be compatible with the semantics of other future
+systems, such as Javascript's Q or Promises/A libraries.
+
+=cut
+
+sub then
+{
+   my $self = shift;
+   my ( $done_code, $fail_code ) = @_;
+
+   if( $done_code and !$fail_code ) {
+      return $self->_sequence( $done_code, CB_SEQ_ONDONE|CB_RESULT );
+   }
+
+   # Complex
+   return $self->_sequence( sub {
+      my $self = shift;
+      if( !$self->{failure} ) {
+         return $self unless $done_code;
+         return $done_code->( $self->get );
+      }
+      else {
+         return $self unless $fail_code;
+         return $fail_code->( $self->failure );
+      }
+   }, CB_SEQ_ONDONE|CB_SEQ_ONFAIL|CB_SELF );
+}
+
+sub else
+{
+   my $self = shift;
+   my ( $fail_code ) = @_;
+
+   return $self->_sequence( $fail_code, CB_SEQ_ONFAIL|CB_RESULT );
+}
+
+=head2 $future = $f1->transform( %args )
+
+Returns a new sequencing C<Future> that wraps the one given as C<$f1>. With no
+arguments this will be a trivial wrapper; C<$future> will complete or fail
+when C<$f1> does, and C<$f1> will be cancelled when C<$future> is.
+
+By passing the following named arguments, the returned C<$future> can be made
+to behave differently to C<$f1>:
+
+=over 8
+
+=item done => CODE
+
+Provides a function to use to modify the result of a successful completion.
+When C<$f1> completes successfully, the result of its C<get> method is passed
+into this function, and whatever it returns is passed to the C<done> method of
+C<$future>
+
+=item fail => CODE
+
+Provides a function to use to modify the result of a failure. When C<$f1>
+fails, the result of its C<failure> method is passed into this function, and
+whatever it returns is passed to the C<fail> method of C<$future>.
+
+=back
+
+=cut
+
+sub transform
+{
+   my $self = shift;
+   my %args = @_;
+
+   my $xfrm_done = $args{done};
+   my $xfrm_fail = $args{fail};
+
+   return $self->_sequence( sub {
+      my $self = shift;
+      if( !$self->{failure} ) {
+         return $self unless $xfrm_done;
+         return $self->new->done( $xfrm_done->( $self->get ) );
+      }
+      else {
+         return $self unless $xfrm_fail;
+         return $self->new->fail( $xfrm_fail->( $self->failure ) );
+      }
+   }, CB_SEQ_ONDONE|CB_SEQ_ONFAIL|CB_SELF );
+}
+
+=head2 $future = $f1->then_with_f( \&code )
+
+Returns a new sequencing C<Future> that runs the code if the first succeeds.
+Identical to C<then>, except that the code reference will be passed both the
+original future, C<$f1>, and its result.
+
+ $f2 = $code->( $f1, @result )
+
+This is useful for conditional execution cases where the code block may just
+return the same result of the original future. In this case it is more
+efficient to return the original future itself.
+
+=cut
+
+sub then_with_f
+{
+   my $self = shift;
+   my ( $done_code ) = @_;
+
+   return $self->_sequence( $done_code, CB_SEQ_ONDONE|CB_SELF|CB_RESULT );
+}
+
+=head2 $future = $f1->else_with_f( \&code )
+
+Returns a new sequencing C<Future> that runs the code if the first fails.
+Identical to C<else>, except that the code reference will be passed both the
+original future, C<$f1>, and its exception and details.
+
+ $f2 = $code->( $f1, $exception, @details )
+
+This is useful for conditional execution cases where the code block may just
+return the same result of the original future. In this case it is more
+efficient to return the original future itself.
+
+=cut
+
+sub else_with_f
+{
+   my $self = shift;
+   my ( $fail_code ) = @_;
+
+   return $self->_sequence( $fail_code, CB_SEQ_ONFAIL|CB_SELF|CB_RESULT );
+}
+
+=head2 $future = $f1->followed_by( \&code )
+
+Returns a new sequencing C<Future> that runs the code regardless of success or
+failure. Once C<$f1> is ready the code reference will be invoked and is passed
+one argument, C<$f1>. It should return a future, C<$f2>. Once C<$f2> completes
+the sequence future will then be marked as complete with whatever result
+C<$f2> gave.
+
+ $f2 = $code->( $f1 )
+
+=cut
+
+sub followed_by
+{
+   my $self = shift;
+   my ( $code ) = @_;
+
+   return $self->_sequence( $code, CB_SEQ_ONDONE|CB_SEQ_ONFAIL|CB_SELF );
+}
+
+=head2 $future = $f1->and_then( \&code )
+
+An older form of C<then_with_f>; this method passes only the original future
+itself to the code, not its result. The code would have to call C<get> on the
+future to obtain the result.
+
+ $f2 = $code->( $f1 )
+
+This method may be removed in a later version; use C<then_with_f> in new code.
+
+=cut
+
+sub and_then
+{
+   my $self = shift;
+   my ( $code ) = @_;
+
+   return $self->_sequence( $code, CB_SEQ_ONDONE|CB_SELF );
+}
+
+=head2 $future = $f1->or_else( \&code )
+
+An older form of C<else_with_f>; this method passes only the original future
+itself to the code, not its failure and details. The code would have to call
+C<failure> on the future to obtain the result.
+
+ $f2 = $code->( $f1 )
+
+This method may be removed in a later version; use C<else_with_f> in new code.
+
+=cut
+
+sub or_else
+{
+   my $self = shift;
+   my ( $code ) = @_;
+
+   return $self->_sequence( $code, CB_SEQ_ONFAIL|CB_SELF );
 }
 
 =head1 DEPENDENT FUTURES

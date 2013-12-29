@@ -10,6 +10,7 @@ use Test::Refcount;
 
 use Future;
 
+# done
 {
    my $future = Future->new;
 
@@ -35,6 +36,7 @@ use Future;
    is_deeply( \@on_done_args, [ result => "here" ], 'Results passed to on_done' );
 
    ok( $future->is_ready, '$future is now ready' );
+   ok( $future->is_done, '$future is done' );
    is_deeply( [ $future->get ], [ result => "here" ], 'Results from $future->get' );
    is( scalar $future->get, "result", 'Result from scalar $future->get' );
 
@@ -116,11 +118,14 @@ use Future;
    $future->on_ready( $f2 );
 
    ok( $f1->is_ready, 'Chained ->on_done for immediate future' );
+   ok( $f1->is_done, 'Chained ->on_done is done for immediate future' );
    is_deeply( [ $f1->get ], [ already => "done" ], 'Results from chained via ->on_done for immediate future' );
    ok( $f2->is_ready, 'Chained ->on_ready for immediate future' );
+   ok( $f2->is_done, 'Chained ->on_ready is done for immediate future' );
    is_deeply( [ $f2->get ], [ already => "done" ], 'Results from chained via ->on_ready for immediate future' );
 }
 
+# fail
 {
    my $future = Future->new;
 
@@ -131,6 +136,7 @@ use Future;
    identical( $future->fail( "Something broke" ), $future, '->fail returns $future' );
 
    ok( $future->is_ready, '$future->fail marks future ready' );
+   ok( !$future->is_done, '$future->fail does not mark future done' );
 
    is( scalar $future->failure, "Something broke", '$future->failure yields exception' );
    my $file = __FILE__;

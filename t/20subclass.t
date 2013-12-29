@@ -10,6 +10,22 @@ use Test::Identity;
 {
    my $f = t::Future::Subclass->new;
 
+   isa_ok( $f->then( sub {} ),
+           "t::Future::Subclass",
+           '$f->then' );
+
+   isa_ok( $f->else( sub {} ),
+           "t::Future::Subclass",
+           '$f->and_then' );
+
+   isa_ok( $f->then_with_f( sub {} ),
+           "t::Future::Subclass",
+           '$f->then_with_f' );
+
+   isa_ok( $f->else_with_f( sub {} ),
+           "t::Future::Subclass",
+           '$f->else_with_f' );
+
    isa_ok( $f->followed_by( sub {} ),
            "t::Future::Subclass",
            '$f->followed_by' );

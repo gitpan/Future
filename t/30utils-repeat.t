@@ -65,8 +65,9 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 
    $future->cancel;
 
-   ok( $running[1]->is_cancelled, 'running future cancelled after eventual is cancelled' );
    ok( !$running[0]->is_cancelled, 'previously running future not cancelled' );
+   ok(  $running[1]->is_cancelled, 'running future cancelled after eventual is cancelled' );
+   ok( !$running[2],               'a third trial is not started' );
 }
 
 # until

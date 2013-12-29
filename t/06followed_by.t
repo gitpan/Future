@@ -178,7 +178,7 @@ use Future;
    my $fseq = $f1->followed_by( sub {} );
 
    like( exception { $f1->done },
-       qr/^Expected code to return a Future in followed_by at \Q$file\E line $line\.?/,
+       qr/^Expected __ANON__\(\Q$file\E line $line\) to return a Future/,
        'Exception from non-Future return' );
 }
 

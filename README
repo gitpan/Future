@@ -150,105 +150,6 @@ CONSTRUCTORS
     blessed `Future' reference, an immediate fail future is returned instead
     to complain about this fact.
 
-  $future = $f1->followed_by( \&code )
-    Returns a new `Future' instance that allows a sequence of operations to
-    be performed. Once `$f1' is ready, the code reference will be invoked
-    and is passed one argument, being `$f1'. It should return a future,
-    `$f2'. Once `$f2' indicates completion the combined future `$future'
-    will then be marked as complete, with whatever result `$f2' gave.
-
-     $f2 = $code->( $f1 )
-
-    If `$future' is cancelled before `$f1' completes, then `$f1' will be
-    cancelled. If it is cancelled after completion then `$f2' is cancelled
-    instead.
-
-    If the `$code' block dies entirely and throws an exception, this will be
-    caught and set as the failure for the returned `$fseq'. The exception
-    will not be propagated to the caller of the method that caused `$f1' to
-    be ready.
-
-    As it is always a mistake to call this method in void context and lose
-    the reference to the returned future (because exception/error handling
-    would be silently dropped), this method warns in void context.
-
-  $future = $f1->and_then( \&code )
-    A convenient shortcut to `followed_by', which invokes the supplied code
-    reference only if the first future completes successfully. If it fails,
-    then the returned future will fail with the same error and the code
-    reference will not be invoked.
-
-  $future = $f1->or_else( \&code )
-    A convenient shortcut to `followed_by', which invokes the supplied code
-    reference only if the first future fails. If it completes successfully,
-    then the returned future will complete with the same result and the code
-    reference will not be invoked.
-
-  $future = $f1->then( \&done_code )
-    Returns a new `Future' instance that allows a sequence of operations to
-    be performed similar to `and_then', except that the code reference is
-    passed the result of `$f1' rather than `$f1' itself.
-
-    If `$f1' completes successfully, its result it passed into the
-    `$done_code' function, which should return a new `Future' whose result
-    will be used to set the result of the overall `$future'. If `$f1' fails
-    this failure is used to set the result of `$future' directly.
-
-     $f2 = $done_code->( @result )
-
-    If `$future' is cancelled before `$f1' completes, then `$f1' will be
-    cancelled. If it is cancelled after completion then `$f2' is cancelled
-    instead.
-
-    This is more convenient than `and_then' in the likely case that the code
-    block does not need the initial future object itself, only the result.
-
-  $future = $f1->else( \&fail_code )
-    Returns a new `Future' instance that allows a sequence of operations to
-    be performed similar to `or_else', except that the code reference is
-    passed the failure of `$f1' rather than `$1' itself.
-
-    If `$f1' fails, its failure is passed into the `$fail_code' function,
-    which should return a new `Future' whose result will be used to set the
-    result of the overall `$future'. If `$f1' completes successful this
-    result is used to set the result of `$future' directly.
-
-     $f2 = $fail_code->( $exception, @details )
-
-    If `$future' is cancelled before `$f1' completes, then `$f1' will be
-    cancelled. If it is cancelled after completion then `$f2' is cancelled
-    instead.
-
-    This is more convenient than `or_else' in the likely case that the code
-    block does not need the initial future object itself, only the failure.
-
-  $future = $f1->then( \&done_code, \&fail_code )
-    The `then' method can also be passed the `$fail_code' block as well,
-    giving a combination of `then' and `else' behaviour.
-
-    This operation is designed to be compatible with the semantics of other
-    future systems, such as Javascript's Q or Promises/A libraries.
-
-  $future = $f1->transform( %args )
-    Returns a new `Future' instance that wraps the one given as `$f1'. With
-    no arguments this will be a trivial wrapper; `$future' will complete or
-    fail when `$f1' does, and `$f1' will be cancelled when `$future' is.
-
-    By passing the following named arguments, the returned `$future' can be
-    made to behave differently to `$f1':
-
-    done => CODE
-            Provides a function to use to modify the result of a successful
-            completion. When `$f1' completes successfully, the result of its
-            `get' method is passed into this function, and whatever it
-            returns is passed to the `done' method of `$future'
-
-    fail => CODE
-            Provides a function to use to modify the result of a failure.
-            When `$f1' fails, the result of its `failure' method is passed
-            into this function, and whatever it returns is passed to the
-            `fail' method of `$future'.
-
 IMPLEMENTATION METHODS
     These methods would primarily be used by implementations of asynchronous
     interfaces.
@@ -347,6 +248,10 @@ USER METHODS
     `done', `fail' or `cancel' methods invoked when the original future
     completes successfully, fails, or is cancelled respectively.
 
+  $done = $future->is_done
+    Returns true on a future if it is ready and completed successfully.
+    Returns false if it is still pending, failed, or was cancelled.
+
   @result = $future->get
   $result = $future->get
     If the future is ready and completed successfully, returns the list of
@@ -440,6 +345,127 @@ USER METHODS
     The same effect can be achieved using curry:
 
      $code = $future->curry::cancel;
+
+SEQUENCING METHODS
+    The following methods all return a new future to represent the
+    combination of its invocant followed by another action given by a code
+    reference. The combined activity waits for the first future to be ready,
+    then may invoke the code depending on the success or failure of the
+    first, or may run it regardless. The returned sequence future represents
+    the entire combination of activity.
+
+    In some cases the code should return a future; in some it should return
+    an immediate result. If a future is returned, the combined future will
+    then wait for the result of this second one. If the combinined future is
+    cancelled, it will cancel either the first future or the second,
+    depending whether the first had completed. If the code block throws an
+    exception instead of returning a value, the sequence future will fail
+    with that exception as its message and no further values.
+
+    As it is always a mistake to call these sequencing methods in void
+    context and lose the reference to the returned future (because
+    exception/error handling would be silently dropped), this method warns
+    in void context.
+
+  $future = $f1->then( \&done_code )
+    Returns a new sequencing `Future' that runs the code if the first
+    succeeds. Once `$f1' succeeds the code reference will be invoked and is
+    passed the list of results. It should return a future, `$f2'. Once `$f2'
+    completes the sequence future will then be marked as complete with
+    whatever result `$f2' gave. If `$f1' fails then the sequence future will
+    immediately fail with the same failure and the code will not be invoked.
+
+     $f2 = $done_code->( @result )
+
+  $future = $f1->else( \&fail_code )
+    Returns a new sequencing `Future' that runs the code if the first fails.
+    Once `$f1' fails the code reference will be invoked and is passed the
+    failure and details. It should return a future, `$f2'. Once `$f2'
+    completes the sequence future will then be marked as complete with
+    whatever result `$f2' gave. If `$f1' succeeds then the sequence future
+    will immediately succeed with the same result and the code will not be
+    invoked.
+
+     $f2 = $fail_code->( $exception, @details )
+
+  $future = $f1->then( \&done_code, \&fail_code )
+    The `then' method can also be passed the `$fail_code' block as well,
+    giving a combination of `then' and `else' behaviour.
+
+    This operation is designed to be compatible with the semantics of other
+    future systems, such as Javascript's Q or Promises/A libraries.
+
+  $future = $f1->transform( %args )
+    Returns a new sequencing `Future' that wraps the one given as `$f1'.
+    With no arguments this will be a trivial wrapper; `$future' will
+    complete or fail when `$f1' does, and `$f1' will be cancelled when
+    `$future' is.
+
+    By passing the following named arguments, the returned `$future' can be
+    made to behave differently to `$f1':
+
+    done => CODE
+            Provides a function to use to modify the result of a successful
+            completion. When `$f1' completes successfully, the result of its
+            `get' method is passed into this function, and whatever it
+            returns is passed to the `done' method of `$future'
+
+    fail => CODE
+            Provides a function to use to modify the result of a failure.
+            When `$f1' fails, the result of its `failure' method is passed
+            into this function, and whatever it returns is passed to the
+            `fail' method of `$future'.
+
+  $future = $f1->then_with_f( \&code )
+    Returns a new sequencing `Future' that runs the code if the first
+    succeeds. Identical to `then', except that the code reference will be
+    passed both the original future, `$f1', and its result.
+
+     $f2 = $code->( $f1, @result )
+
+    This is useful for conditional execution cases where the code block may
+    just return the same result of the original future. In this case it is
+    more efficient to return the original future itself.
+
+  $future = $f1->else_with_f( \&code )
+    Returns a new sequencing `Future' that runs the code if the first fails.
+    Identical to `else', except that the code reference will be passed both
+    the original future, `$f1', and its exception and details.
+
+     $f2 = $code->( $f1, $exception, @details )
+
+    This is useful for conditional execution cases where the code block may
+    just return the same result of the original future. In this case it is
+    more efficient to return the original future itself.
+
+  $future = $f1->followed_by( \&code )
+    Returns a new sequencing `Future' that runs the code regardless of
+    success or failure. Once `$f1' is ready the code reference will be
+    invoked and is passed one argument, `$f1'. It should return a future,
+    `$f2'. Once `$f2' completes the sequence future will then be marked as
+    complete with whatever result `$f2' gave.
+
+     $f2 = $code->( $f1 )
+
+  $future = $f1->and_then( \&code )
+    An older form of `then_with_f'; this method passes only the original
+    future itself to the code, not its result. The code would have to call
+    `get' on the future to obtain the result.
+
+     $f2 = $code->( $f1 )
+
+    This method may be removed in a later version; use `then_with_f' in new
+    code.
+
+  $future = $f1->or_else( \&code )
+    An older form of `else_with_f'; this method passes only the original
+    future itself to the code, not its failure and details. The code would
+    have to call `failure' on the future to obtain the result.
+
+     $f2 = $code->( $f1 )
+
+    This method may be removed in a later version; use `else_with_f' in new
+    code.
 
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and

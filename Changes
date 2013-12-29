@@ -1,5 +1,14 @@
 Revision history for Future
 
+0.21    2013/12/29 18:14:41
+        [CHANGES]
+         * Major performance improvement by folding out some layers of sub {}
+           wrapping in sequencing operations
+         * Added ->then_with_f and ->else_with_f
+        
+        [BUGFIXES]
+         * Don't start another trial after cancelling a repeat() (RT91147)
+
 0.20    2013/11/18 19:14:27
         [CHANGES]
          * Include an indication of done/failed/cancelled status of a Future
