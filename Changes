@@ -1,5 +1,15 @@
 Revision history for Future
 
+0.22    2014/01/12 03:12:18
+        [CHANGES]
+         * Ignore ->done or ->fail on cancelled Futures
+         * Added ->then_done, ->then_fail, ->else_done, ->else_fail
+         * Neaten up naming of fmap* family - provide both long and short
+           names for each function
+         * Added Future::Utils::call and call_with_escape
+         * Ensure that dependent futures on subclasses tries to use derived
+           futures as prototype if possible
+
 0.21    2013/12/29 18:14:41
         [CHANGES]
          * Major performance improvement by folding out some layers of sub {}

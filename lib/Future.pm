@@ -1,7 +1,7 @@
 #  You may distribute under the terms of either the GNU General Public License
 #  or the Artistic License (the same terms as Perl itself)
 #
-#  (C) Paul Evans, 2011-2013 -- leonerd@leonerd.org.uk
+#  (C) Paul Evans, 2011-2014 -- leonerd@leonerd.org.uk
 
 package Future;
 
@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.21';
+our $VERSION = '0.22';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -179,6 +179,9 @@ use constant {
 
    CB_SEQ_ONDONE => 1<<5, # Sequencing on success (->then)
    CB_SEQ_ONFAIL => 1<<6, # Sequencing on failure (->else)
+
+   CB_SEQ_IMDONE => 1<<7, # $code is in fact immediate ->done result
+   CB_SEQ_IMFAIL => 1<<8, # $code is in fact immediate ->fail result
 };
 
 use constant CB_ALWAYS => CB_DONE|CB_FAIL|CB_CANCEL;
@@ -310,6 +313,16 @@ sub _mark_ready
          my $f2;
          if( $done and $flags & CB_SEQ_ONDONE or
              $fail and $flags & CB_SEQ_ONFAIL ) {
+
+            if( $flags & CB_SEQ_IMDONE ) {
+               $fseq->done( @$code );
+               next;
+            }
+            elsif( $flags & CB_SEQ_IMFAIL ) {
+               $fseq->fail( @$code );
+               next;
+            }
+
             my @args = (
                ( $flags & CB_SELF   ? $self : () ),
                ( $flags & CB_RESULT ? @result : () ),
@@ -372,12 +385,16 @@ Returns the C<$future> to allow easy chaining to create an immediate future by
 
  return Future->new->done( ... )
 
+If the future is already cancelled, this request is ignored. If the future is
+already complete with a result or a failure, an exception is thrown.
+
 =cut
 
 sub done
 {
    my $self = shift;
 
+   $self->{cancelled} and return $self;
    $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->done";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
    $self->{result} = [ @_ ];
@@ -418,6 +435,9 @@ future by
 
  return Future->new->fail( ... )
 
+If the future is already cancelled, this request is ignored. If the future is
+already complete with a result or a failure, an exception is thrown.
+
 =cut
 
 sub fail
@@ -425,6 +445,7 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
+   $self->{cancelled} and return $self;
    $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->fail'ed";
    $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or Carp::croak "$self ->fail requires an exception that is true";
@@ -838,6 +859,13 @@ sub _sequence
       return $f1 if $f1->is_done and not( $flags & CB_SEQ_ONDONE ) or
                     $f1->failure and not( $flags & CB_SEQ_ONFAIL );
 
+      if( $flags & CB_SEQ_IMDONE ) {
+         return Future->new->done( @$code );
+      }
+      elsif( $flags & CB_SEQ_IMFAIL ) {
+         return Future->new->fail( @$code );
+      }
+
       my @args = (
          ( $flags & CB_SELF ? $f1 : () ),
          ( $flags & CB_RESULT ? $f1->is_done ? $f1->get :
@@ -999,6 +1027,29 @@ sub then_with_f
    return $self->_sequence( $done_code, CB_SEQ_ONDONE|CB_SELF|CB_RESULT );
 }
 
+=head2 $future = $f->then_done( @result )
+
+=head2 $future = $f->then_fail( $exception, @details )
+
+Convenient shortcuts to returning an immediate future from a C<then> block,
+when the result is already known.
+
+=cut
+
+sub then_done
+{
+   my $self = shift;
+   my ( @result ) = @_;
+   return $self->_sequence( \@result, CB_SEQ_ONDONE|CB_SEQ_IMDONE );
+}
+
+sub then_fail
+{
+   my $self = shift;
+   my ( @failure ) = @_;
+   return $self->_sequence( \@failure, CB_SEQ_ONDONE|CB_SEQ_IMFAIL );
+}
+
 =head2 $future = $f1->else_with_f( \&code )
 
 Returns a new sequencing C<Future> that runs the code if the first fails.
@@ -1019,6 +1070,29 @@ sub else_with_f
    my ( $fail_code ) = @_;
 
    return $self->_sequence( $fail_code, CB_SEQ_ONFAIL|CB_SELF|CB_RESULT );
+}
+
+=head2 $future = $f->else_done( @result )
+
+=head2 $future = $f->else_fail( $exception, @details )
+
+Convenient shortcuts to returning an immediate future from a C<else> block,
+when the result is already known.
+
+=cut
+
+sub else_done
+{
+   my $self = shift;
+   my ( @result ) = @_;
+   return $self->_sequence( \@result, CB_SEQ_ONFAIL|CB_SEQ_IMDONE );
+}
+
+sub else_fail
+{
+   my $self = shift;
+   my ( @failure ) = @_;
+   return $self->_sequence( \@failure, CB_SEQ_ONFAIL|CB_SEQ_IMFAIL );
 }
 
 =head2 $future = $f1->followed_by( \&code )
@@ -1085,9 +1159,9 @@ sub or_else
 
 The following constructors all take a list of component futures, and return a
 new future whose readiness somehow depends on the readiness of those
-components. The first non-immediate component future will be used as the
+components. The first derived class component future will be used as the
 prototype for constructing the return value, so it respects subclassing
-correctly.
+correctly, or failing that a plain C<Future>.
 
 =cut
 
@@ -1100,12 +1174,12 @@ sub _new_dependent
       blessed $sub and $sub->isa( "Future" ) or Carp::croak "Expected a Future, got $_";
    }
 
+   # Find the best prototype. Ideally anything derived if we can find one.
    my $self;
-   $_->is_ready or $self = $_->new, last for @$subs;
+   ref($_) eq "Future" or $self = $_->new, last for @$subs;
 
-   # No non-immediates; just clone the first one anyway then because the
-   # result will necessarily be immediate
-   $self ||= $subs->[0]->new;
+   # No derived ones; just have to be a basic class then
+   $self ||= Future->new;
 
    $self->{subs} = $subs;
 

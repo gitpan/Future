@@ -1,25 +1,28 @@
 #  You may distribute under the terms of either the GNU General Public License
 #  or the Artistic License (the same terms as Perl itself)
 #
-#  (C) Paul Evans, 2013 -- leonerd@leonerd.org.uk
+#  (C) Paul Evans, 2013-2014 -- leonerd@leonerd.org.uk
 
 package Future::Utils;
 
 use strict;
 use warnings;
 
-our $VERSION = '0.21';
+our $VERSION = '0.22';
 
 use Exporter 'import';
 
 our @EXPORT_OK = qw(
+   call
+   call_with_escape
+
    repeat
    try_repeat try_repeat_until_success
    repeat_until_success
 
-   fmap fmap_concat
-   fmap1
-   fmap_void
+   fmap  fmap_concat
+   fmap1 fmap_scalar
+   fmap0 fmap_void
 );
 
 use Carp;
@@ -66,15 +69,15 @@ C<Future::Utils> - utility functions for working with C<Future> objects
  } foreach => \@items;
 
 Z<>
- use Future::Utils qw( fmap fmap1 fmap_void );
+ use Future::Utils qw( fmap_concat fmap_scalar fmap_void );
 
- my $result_f = fmap {
+ my $result_f = fmap_concat {
     my $item = shift;
     ...
     return $item_f;
  } foreach => \@items, concurrent => 4;
 
- my $result_f = fmap1 {
+ my $result_f = fmap_scalar {
     my $item = shift;
     ...
     return $item_f;
@@ -87,6 +90,59 @@ Z<>
  } foreach => \@items, concurrent => 10;
 
 =cut
+
+=head1 INVOKING A BLOCK OF CODE
+
+=head2 $f = call { CODE }
+
+The C<call> function invokes a block of code that returns a future, and simply
+returns the future it returned. The code is wrapped in an C<eval {}> block, so
+that if it throws an exception this is turned into an immediate failed
+C<Future>. If the code does not return a C<Future>, then an immediate failed
+C<Future> instead.
+
+(This is equivalent to using C<< Future->call >>, but is duplicated here for
+completeness).
+
+=cut
+
+sub call(&)
+{
+   my ( $code ) = @_;
+   return Future->call( $code );
+}
+
+=head2 $f = call_with_escape { CODE }
+
+The C<call_with_escape> function invokes a block of code that returns a
+future, and passes in a separate future (called here an "escape future").
+Normally this is equivalent to the simple C<call> function. However, if the
+code captures this future and completes it by calling C<done> or C<fail> on
+it, the future returned by C<call_with_escape> immediately completes with this
+result, and the future returned by the code itself is cancelled.
+
+This can be used to implement short-circuit return from an iterating loop or
+complex sequence of code, or immediate fail that bypasses failure handling
+logic in the code itself, or several other code patterns.
+
+ $f = $code->( $escape_f )
+
+(This can be considered similar to C<call-with-escape-continuation> as found
+in some Scheme implementations).
+
+=cut
+
+sub call_with_escape(&)
+{
+   my ( $code ) = @_;
+
+   my $escape_f = Future->new;
+
+   return Future->wait_any(
+      Future->call( $code, $escape_f ),
+      $escape_f,
+   );
+}
 
 =head1 REPEATING A BLOCK OF CODE
 
@@ -483,7 +539,7 @@ sub _fmap
    return $future;
 }
 
-=head2 $future = fmap { CODE } ...
+=head2 $future = fmap_concat { CODE } ...
 
 This version of C<fmap> expects each item future to return a list of zero or
 more values, and the overall result will be the concatenation of all these
@@ -492,16 +548,14 @@ results. It acts like a future-based equivalent to Perl's C<map> operator.
 The results are returned in the order of the original input values, not in the
 order their futures complete in. Because of the intermediate storage of
 C<ARRAY> references and final flattening operation used to implement this
-behaviour, this function is slightly less efficient than C<fmap1> or
+behaviour, this function is slightly less efficient than C<fmap_scalar> or
 C<fmap_void> in cases where item futures are expected only ever to return one,
 or zero values, respectively.
 
-This function is also available under the name C<fmap_concat> to emphasise the
-concatenation behaviour.
+This function is also available under the name of simply C<fmap> to emphasise
+its similarity to perl's C<map> keyword.
 
 =cut
-
-*fmap = \&fmap_concat; # alias
 
 sub fmap_concat(&@)
 {
@@ -512,8 +566,9 @@ sub fmap_concat(&@)
       return Future->new->done( map { @$_ } @_ );
    });
 }
+*fmap = \&fmap_concat;
 
-=head2 $future = fmap1 { CODE } ...
+=head2 $future = fmap_scalar { CODE } ...
 
 This version of C<fmap> acts more like the C<map> functions found in Scheme or
 Haskell; it expects that each item future returns only one value, and the
@@ -522,15 +577,18 @@ items. If an item future returns more than one value the others will be
 discarded. If it returns no value, then C<undef> will be substituted in its
 place so that the result list remains in correspondence with the input list.
 
+This function is also available under the shorter name of C<fmap1>.
+
 =cut
 
-sub fmap1(&@)
+sub fmap_scalar(&@)
 {
    my $code = shift;
    my %args = @_;
 
    _fmap( $code, %args, collect => "scalar" )
 }
+*fmap1 = \&fmap_scalar;
 
 =head2 $future = fmap_void { CODE } ...
 
@@ -543,6 +601,8 @@ to control concurrency of a function call iterating over a list of items,
 obtaining its results by some other means (such as side-effects on captured
 variables, or some external system).
 
+This function is also available under the shorter name of C<fmap0>.
+
 =cut
 
 sub fmap_void(&@)
@@ -552,6 +612,7 @@ sub fmap_void(&@)
 
    _fmap( $code, %args, collect => "void" )
 }
+*fmap0 = \&fmap_void;
 
 =head1 AUTHOR
 

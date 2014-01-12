@@ -77,6 +77,12 @@ use Test::Identity;
    isa_ok( Future->wait_all( $imm, $f ),
            "t::Future::Subclass",
            'Future->wait_all( $imm, $f )' );
+
+   # Pick the more derived subclass even if all are pending
+
+   isa_ok( Future->wait_all( Future->new, $f ),
+           "t::Future::Subclass",
+           'Future->wait_all( Future->new, $f' );
 }
 
 my $f_await;

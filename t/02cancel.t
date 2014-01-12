@@ -98,4 +98,13 @@ use Future;
    is( $cancelled, 1, 'Chained cancellation' );
 }
 
+# ->done on cancelled
+{
+   my $f = Future->new;
+   $f->cancel;
+
+   ok( eval { $f->done( "ignored" ); 1 }, '->done on cancelled future is ignored' );
+   ok( eval { $f->fail( "ignored" ); 1 }, '->fail on cancelled future is ignored' );
+}
+
 done_testing;

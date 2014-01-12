@@ -1,7 +1,7 @@
 #  You may distribute under the terms of either the GNU General Public License
 #  or the Artistic License (the same terms as Perl itself)
 #
-#  (C) Paul Evans, 2013 -- leonerd@leonerd.org.uk
+#  (C) Paul Evans, 2013-2014 -- leonerd@leonerd.org.uk
 
 =head1 NAME
 
@@ -277,6 +277,55 @@ item of the given list as the first parameter.
     F_INSPECT( $thing );
  } foreach => \@THINGS;
 
+=head1 SHORT-CIRCUITING
+
+Sometimes a result is determined that should be returned through several
+levels of control structure. Regular Perl code has such keywords as C<return>
+to return a value from a function immediately, or C<last> for immediately
+stopping execution of a loop.
+
+ sub func {
+    foreach my $item ( @LIST ) {
+       if( COND($item) ) {
+          return $item;
+       }
+    }
+    return MAKE_NEW_ITEM();
+ }
+
+Z<>
+
+The C<Future::Utils::call_with_escape> function allows this general form of
+control flow, by calling a block of code that is expected to return a future,
+and itself returning a future. Under normal circumstances the result of this
+returned future will be that of the future the code returned.
+
+However, the code is also passed in a future value, called here the "escape
+future". If the code captures this future and completes it (either by calling
+C<done> or C<fail>), then the returned future immediately completes with that
+result instead, and the future returned by the code block is cancelled.
+
+ my $f = call_with_escape {
+    my $escape_f = shift;
+
+    ( repeat {
+       my $item = shift;
+       COND($item)->then( sub {
+          if( shift ) {
+             $escape_f->done( $item );
+          }
+          return Future->new->done;
+       })
+    } foreach => \@ITEMS )->then( sub {
+       MAKE_NEW_ITEM();
+    });
+ };
+
+Here, if C<$escape_f> is completed by the condition test, the future chain
+returned by the code (that is, the C<then> chain of the C<repeat> block
+followed by C<MAKE_NEW_ITEM()>) will be cancelled, and C<$f> itself will
+receive this result.
+
 =head1 CONCURRENCY
 
 This final section of the phrasebook demonstrates a number of abilities that
@@ -370,9 +419,9 @@ number "in flight" at any one time:
     F_FUNC( $item )
  } foreach => \@ITEMS, concurrent => 10;
 
-The C<fmap> and C<fmap1> functions return a Future that will eventually give
-the collected results of the individual item futures, thus making them similar
-to perl's C<map> operator.
+The C<fmap> and C<fmap_scalar> functions return a Future that will eventually
+give the collected results of the individual item futures, thus making them
+similar to perl's C<map> operator.
 
 Sometimes, no result is required, and the items are run in a loop simply for
 some side-effect of the body.

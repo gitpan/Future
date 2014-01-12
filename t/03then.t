@@ -215,4 +215,50 @@ use Future;
    is( scalar $fseq->get, "f2 result", '$fseq->get returns results' );
 }
 
+# then_done
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->then_done( second => "result" );
+
+   $f1->done( first => );
+
+   ok( $fseq->is_ready, '$fseq done after $f1 done' );
+   is_deeply( [ $fseq->get ], [ second => "result" ], '$fseq->get returns result for then_done' );
+
+   my $fseq2 = $f1->then_done( third => "result" );
+
+   ok( $fseq2->is_ready, '$fseq2 done after ->then_done on immediate' );
+   is_deeply( [ $fseq2->get ], [ third => "result" ], '$fseq2->get returns result for then_done on immediate' );
+
+   my $f2 = Future->new;
+   $fseq = $f2->then_done( "result" );
+   $f2->fail( "failure" );
+
+   is( scalar $fseq->failure, "failure", '->then_done ignores failure' );
+}
+
+# then_fail
+{
+   my $f1 = Future->new;
+
+   my $fseq = $f1->then_fail( second => "result" );
+
+   $f1->done( first => );
+
+   ok( $fseq->is_ready, '$fseq done after $f1 done' );
+   is_deeply( [ $fseq->failure ], [ second => "result" ], '$fseq->failure returns result for then_fail' );
+
+   my $fseq2 = $f1->then_fail( third => "result" );
+
+   ok( $fseq2->is_ready, '$fseq2 done after ->then_fail on immediate' );
+   is_deeply( [ $fseq2->failure ], [ third => "result" ], '$fseq2->failure returns result for then_fail on immediate' );
+
+   my $f2 = Future->new;
+   $fseq = $f2->then_fail( "fail2" );
+   $f2->fail( "failure" );
+
+   is( scalar $fseq->failure, "failure", '->then_fail ignores failure' );
+}
+
 done_testing;

@@ -164,6 +164,10 @@ IMPLEMENTATION METHODS
 
      return Future->new->done( ... )
 
+    If the future is already cancelled, this request is ignored. If the
+    future is already complete with a result or a failure, an exception is
+    thrown.
+
   $code = $future->done_cb
     Returns a `CODE' reference that, when invoked, calls the `done' method.
     This makes it simple to pass as a callback function to other code.
@@ -185,6 +189,10 @@ IMPLEMENTATION METHODS
     failed future by
 
      return Future->new->fail( ... )
+
+    If the future is already cancelled, this request is ignored. If the
+    future is already complete with a result or a failure, an exception is
+    thrown.
 
   $code = $future->fail_cb
     Returns a `CODE' reference that, when invoked, calls the `fail' method.
@@ -427,6 +435,11 @@ SEQUENCING METHODS
     just return the same result of the original future. In this case it is
     more efficient to return the original future itself.
 
+  $future = $f->then_done( @result )
+  $future = $f->then_fail( $exception, @details )
+    Convenient shortcuts to returning an immediate future from a `then'
+    block, when the result is already known.
+
   $future = $f1->else_with_f( \&code )
     Returns a new sequencing `Future' that runs the code if the first fails.
     Identical to `else', except that the code reference will be passed both
@@ -437,6 +450,11 @@ SEQUENCING METHODS
     This is useful for conditional execution cases where the code block may
     just return the same result of the original future. In this case it is
     more efficient to return the original future itself.
+
+  $future = $f->else_done( @result )
+  $future = $f->else_fail( $exception, @details )
+    Convenient shortcuts to returning an immediate future from a `else'
+    block, when the result is already known.
 
   $future = $f1->followed_by( \&code )
     Returns a new sequencing `Future' that runs the code regardless of
@@ -470,9 +488,9 @@ SEQUENCING METHODS
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and
     return a new future whose readiness somehow depends on the readiness of
-    those components. The first non-immediate component future will be used
+    those components. The first derived class component future will be used
     as the prototype for constructing the return value, so it respects
-    subclassing correctly.
+    subclassing correctly, or failing that a plain `Future'.
 
   $future = Future->wait_all( @subfutures )
     Returns a new `Future' instance that will indicate it is ready once all
