@@ -1,5 +1,15 @@
 Revision history for Future
 
+0.23    2013/01/19 15:26:55
+        [CHANGES]
+         * Link to Futures advent calendar 2013
+         * Fixes/additions to Phrasebook documentation, including section
+           about tree recursion
+
+        [BUGFIXES]
+         * Ensure that late addition of additional items to a fmap foreach
+           array works correctly even with concurrency
+
 0.22    2014/01/12 03:12:18
         [CHANGES]
          * Ignore ->done or ->fail on cancelled Futures

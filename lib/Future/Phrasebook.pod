@@ -243,8 +243,8 @@ Z<>
     F_TRIAL();
  } until => sub { shift->failure };
 
-Another variation is the C<repeat_until_success> function, which provides a
-convenient shortcut to calling C<repeat> with a condition that makes another
+Another variation is the C<try_repeat_until_success> function, which provides
+a convenient shortcut to calling C<repeat> with a condition that makes another
 attempt each time the previous one fails; stopping once it achieves a
 successful result.
 
@@ -254,7 +254,7 @@ successful result.
 
 Z<>
 
- my $f = repeat_until_success {
+ my $f = try_repeat_until_success {
     F_TRIAL();
  };
 
@@ -277,6 +277,50 @@ item of the given list as the first parameter.
     F_INSPECT( $thing );
  } foreach => \@THINGS;
 
+=head2 Recursing over a Tree
+
+A regular call/return function can use recursion to walk over a tree-shaped
+structure, where each item yields a list of child items.
+
+ sub WALK
+ {
+    my ( $item ) = @_;
+    ...
+    WALK($_) foreach CHILDREN($item);
+ }
+
+This recursive structure can be turned into a C<while()>-based repeat loop by
+using an array to store the remaining items to walk into, instead of using the
+perl stack directly:
+
+ sub WALK
+ {
+    my @more = ( $root );
+    while( @more ) {
+       my $item = shift @more;
+       ...
+       unshift @more, CHILDREN($item)
+    }
+ }
+
+This arrangement then allows us to use C<fmap_void> to walk this structure
+using Futures, possibly concurrently. A lexical array variable is captured
+that holds the stack of remaining items, which is captured by the item code so
+it can C<unshift> more into it, while also being used as the actual C<fmap>
+control array.
+
+ my @more = ( $root );
+
+ my $f = fmap_void {
+    my $item = shift;
+    ...->on_done( sub {
+       unshift @more, @CHILDREN;
+    })
+ } foreach => \@more;
+
+By choosing to either C<unshift> or C<push> more items onto this list, the
+tree can be walked in either depth-first or breadth-first order.
+
 =head1 SHORT-CIRCUITING
 
 Sometimes a result is determined that should be returned through several
@@ -293,17 +337,16 @@ stopping execution of a loop.
     return MAKE_NEW_ITEM();
  }
 
-Z<>
-
 The C<Future::Utils::call_with_escape> function allows this general form of
 control flow, by calling a block of code that is expected to return a future,
 and itself returning a future. Under normal circumstances the result of this
-returned future will be that of the future the code returned.
+future propagates through to the one returned by C<call_with_escape>.
 
 However, the code is also passed in a future value, called here the "escape
 future". If the code captures this future and completes it (either by calling
-C<done> or C<fail>), then the returned future immediately completes with that
-result instead, and the future returned by the code block is cancelled.
+C<done> or C<fail>), then the overall returned future immediately completes
+with that result instead, and the future returned by the code block is
+cancelled.
 
  my $f = call_with_escape {
     my $escape_f = shift;
@@ -311,7 +354,8 @@ result instead, and the future returned by the code block is cancelled.
     ( repeat {
        my $item = shift;
        COND($item)->then( sub {
-          if( shift ) {
+          my ( $result ) = @_;
+          if( $result ) {
              $escape_f->done( $item );
           }
           return Future->new->done;

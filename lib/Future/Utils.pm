@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.22';
+our $VERSION = '0.23';
 
 use Exporter 'import';
 
@@ -33,6 +33,17 @@ our @CARP_NOT = qw( Future );
 C<Future::Utils> - utility functions for working with C<Future> objects
 
 =head1 SYNOPSIS
+
+ use Future::Utils qw( call_with_escape );
+
+ my $result_f = call_with_escape {
+    my $escape_f = shift;
+    my $f = ...
+       $escape_f->done( "immediate result" );
+       ...
+ };
+
+Z<>
 
  use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 
@@ -69,6 +80,7 @@ C<Future::Utils> - utility functions for working with C<Future> objects
  } foreach => \@items;
 
 Z<>
+
  use Future::Utils qw( fmap_concat fmap_scalar fmap_void );
 
  my $result_f = fmap_concat {
@@ -405,7 +417,9 @@ The following named arguments are common to each C<fmap*> function:
 
 Provides the list of items to iterate over, as an C<ARRAY> reference.
 
-The referenced array may be modified by this operation.
+The referenced array will be modified by this operation, C<shift>ing one item
+from it each time. The can C<push> more items to this array as it runs, and
+they will be included in the iteration.
 
 =item generate => CODE
 
@@ -414,6 +428,9 @@ once for each required item. The function should return a single item, or an
 empty list to indicate it has no more items.
 
  ( $item ) = $generate->()
+
+This function will be invoked each time any previous item future has completed
+and may be called again even after it has returned empty.
 
 =item concurrent => INT
 
@@ -447,9 +464,12 @@ below.
 # It can tell which circumstance by whether the slot itself is defined or not
 sub _fmap_slot
 {
-   my @args = my ( $slots, $idx, $code, $generator, $collect, $results, $return ) = @_;
+   my ( $slots, undef, $code, $generator, $collect, $results, $return ) = @_;
 
-   while(1) {
+   SLOT: while(1) {
+      # Capture args each call because we mutate them
+      my ( undef, $idx ) = my @args = @_;
+
       unless( $slots->[$idx] ) {
          # No item Future yet (case a), so create one
          my $item;
@@ -485,6 +505,17 @@ sub _fmap_slot
          $args[-1] = ( $return ||= $f->new );
          $f->on_done( sub { _fmap_slot( @args ) } );
          $f->on_fail( $return );
+
+         # Try looking for more that might be ready
+         my $i = $idx + 1;
+         while( $i != $idx ) {
+            $i++;
+            $i %= @$slots;
+            next if defined $slots->[$i];
+
+            $_[1] = $i;
+            redo SLOT;
+         }
          return $return;
       }
 
@@ -507,7 +538,7 @@ sub _fmap
    my %args = @_;
 
    my $concurrent = $args{concurrent} || 1;
-   my @slots = ( undef ) x $concurrent;
+   my @slots;
 
    my $results = [];
    my $future = $args{return};
@@ -524,7 +555,7 @@ sub _fmap
    }
 
    # If any of these immediately fail, don't bother continuing
-   foreach my $idx ( 0 .. $#slots ) {
+   foreach my $idx ( 0 .. $concurrent-1 ) {
       $future = _fmap_slot( \@slots, $idx, $code, $generator, $args{collect}, $results, $future );
       last if $future->is_ready;
    }

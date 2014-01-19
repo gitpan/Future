@@ -80,6 +80,38 @@ use Future::Utils qw( fmap_void );
    ok( $future->is_ready, '$future now ready after concurrent subs done' );
 }
 
+# fmap_void late-addition concurrently
+{
+   my @items = ( 1, 2, 3 );
+   my @subf;
+   my $future = fmap_void {
+      my $val = shift;
+      my $f = $subf[$val] = Future->new;
+      $f->on_done( sub { push @items, 4, 5, 6 } ) if $val == 3;
+      $f
+   } foreach => \@items,
+     concurrent => 4;
+
+   ok( defined $future, '$future defined for fmap concurrent=3 late-add' );
+
+   ok( $subf[1] && $subf[2] && $subf[3], '3 subfutures initally ready' );
+
+   $subf[1]->done;
+   $subf[2]->done;
+
+   ok( !$subf[4], 'No $subf[4] before $subf[3] done' );
+
+   $subf[3]->done;
+
+   ok( $subf[4] && $subf[5] && $subf[6], '3 new subfutures now ready' );
+
+   $subf[4]->done;
+   $subf[5]->done;
+   $subf[6]->done;
+
+   ok( $future->is_ready, '$future now ready after all 6 subfutures done' );
+}
+
 # fmap_void on immediates
 {
    my $future = fmap_void {

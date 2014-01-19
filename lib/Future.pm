@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.22';
+our $VERSION = '0.23';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed );
@@ -1750,6 +1750,12 @@ object
 London Perl Workshop, 2012.
 
 L<https://docs.google.com/presentation/d/1UkV5oLcTOOXBXPh8foyxko4PR28_zU_aVx6gBms7uoo/edit>
+
+=item *
+
+"Futures advent calendar 2013"
+
+L<http://leonerds-code.blogspot.co.uk/2013/12/futures-advent-day-1.html>
 
 =back
 
