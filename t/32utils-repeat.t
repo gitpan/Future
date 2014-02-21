@@ -155,4 +155,24 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    is( scalar $future->get, 3, '$future->get' );
 }
 
+# repeat prints a warning if asked to retry a failure
+{
+   my $warnings = "";
+   local $SIG{__WARN__} = sub { $warnings .= join "", @_ };
+
+   my $attempt = 0;
+   my $future = repeat {
+      if( ++$attempt < 3 ) {
+         return Future->new->fail( "try again" );
+      }
+      else {
+         return Future->new->done( "OK" );
+      }
+   } while => sub { $_[0]->failure };
+
+   ok( $future->is_ready, '$future is now ready after repeat retries failures' );
+   like( $warnings, qr/^Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead at \Q$0\E line \d+\.$/,
+      'Warnings printing by repeat retries failures' );
+}
+
 done_testing;

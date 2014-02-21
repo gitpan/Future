@@ -9,11 +9,14 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.23';
+our $VERSION = '0.24';
 
 use Carp qw(); # don't import croak
-use Scalar::Util qw( weaken blessed );
+use Scalar::Util qw( weaken blessed reftype );
 use B qw( svref_2object );
+
+# we are not overloaded, but we want to check if other objects are
+require overload;
 
 our @CARP_NOT = qw( Future::Utils );
 
@@ -204,13 +207,23 @@ sub CvNAME_FILE_LINE
    sprintf "%s(%s line %d)", $cv->GV->NAME, $cop->file, $cop->line;
 }
 
+sub _callable
+{
+   my ( $cb ) = @_;
+   reftype($cb) eq 'CODE' or overload::Method($cb, '&{}')
+}
+
 sub new
 {
    my $proto = shift;
    return bless {
       ready     => 0,
       callbacks => [], # [] = [$type, ...]
-      ( DEBUG ? ( constructed_at => join " line ", (caller)[1,2] ) : () ),
+      ( DEBUG ?
+         ( do { my $at = Carp::shortmess( "constructed" );
+                chomp $at; $at =~ s/\.$//;
+                constructed_at => $at } )
+         : () ),
    }, ( ref $proto || $proto );
 }
 
@@ -228,7 +241,7 @@ END { $GLOBAL_END = 1; }
    # a variable set to 'undef' or close of scope, because caller can't see it;
    # the current op has already been updated. The best we can do is indicate
    # 'near'.
-   warn "$self was constructed at $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
+   warn "$self was $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
 } if DEBUG;
 
 =head2 $future = Future->wrap( @values )
@@ -850,6 +863,9 @@ sub _sequence
    my $func = (caller 1)[3];
    $func =~ s/^.*:://;
 
+   $flags & (CB_SEQ_IMDONE|CB_SEQ_IMFAIL) or _callable( $code ) or
+      Carp::croak "Expected \$code to be callable in ->$func";
+
    if( !defined wantarray ) {
       Carp::carp "Calling ->$func in void context";
    }
@@ -933,6 +949,11 @@ sub then
    if( $done_code and !$fail_code ) {
       return $self->_sequence( $done_code, CB_SEQ_ONDONE|CB_RESULT );
    }
+
+   !$done_code or _callable( $done_code ) or
+      Carp::croak "Expected \$done_code to be callable in ->then";
+   !$fail_code or _callable( $fail_code ) or
+      Carp::croak "Expected \$fail_code to be callable in ->then";
 
    # Complex
    return $self->_sequence( sub {

@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.23';
+our $VERSION = '0.24';
 
 use Exporter 'import';
 
@@ -245,11 +245,18 @@ The generator is called in list context but should return only one item per
 call. Subsequent values will be ignored. When it has no more items to return
 it should return an empty list.
 
+For backward compatibility this function will allow a C<while> or C<until>
+condition that requests a failure be repeated, but it will print a one-time
+warning if it has to do that. To apply repeating behaviour that can catch and
+retry failures, use C<try_repeat> instead.
+
 =cut
+
+my $try_repeat_warned;
 
 sub _repeat
 {
-   my ( $code, $return, $trialp, $cond, $sense ) = @_;
+   my ( $code, $return, $trialp, $cond, $sense, $is_try ) = @_;
 
    my $prev = $$trialp;
 
@@ -262,7 +269,7 @@ sub _repeat
          $return ||= $trial->new;
          $trial->on_ready( sub {
             return if $$trialp->is_cancelled;
-            _repeat( $code, $return, $trialp, $cond, $sense );
+            _repeat( $code, $return, $trialp, $cond, $sense, $is_try );
          });
          return $return;
       }
@@ -273,6 +280,11 @@ sub _repeat
          $trial->on_done( $return );
          $trial->on_fail( $return );
          return $return;
+      }
+
+      if( !$is_try and $trial->failure ) {
+         $try_repeat_warned or $try_repeat_warned++,
+            carp "Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead";
       }
 
       # redo
@@ -344,8 +356,8 @@ sub repeat(&@)
    my $future = $args{return};
 
    my $trial;
-   $args{while} and $future = _repeat( $code, $future, \$trial, $args{while}, 0 );
-   $args{until} and $future = _repeat( $code, $future, \$trial, $args{until}, 1 );
+   $args{while} and $future = _repeat( $code, $future, \$trial, $args{while}, 0, $args{try} );
+   $args{until} and $future = _repeat( $code, $future, \$trial, $args{until}, 1, $args{try} );
 
    $future->on_cancel( sub { $trial->cancel } );
 
@@ -354,16 +366,22 @@ sub repeat(&@)
 
 =head2 $future = try_repeat { CODE } ...
 
-Currently a simple alias to C<repeat>. However, in some later version the
-C<repeat> function will be changed so that if a trial future fails, then the
-eventual future will immediately fail as well, making its semantics a little
-closer to that of a C<while {}> loop in Perl. Code that specifically wishes
-to catch failures in trial futures and retry the block should use
-C<try_repeat> specifically.
+A variant of C<repeat> that doesn't warn when the trial fails and the
+condition code asks for it to be repeated.
+
+In some later version the C<repeat> function will be changed so that if a
+trial future fails, then the eventual future will immediately fail as well,
+making its semantics a little closer to that of a C<while {}> loop in Perl.
+Code that specifically wishes to catch failures in trial futures and retry
+the block should use C<try_repeat> specifically.
 
 =cut
 
-*try_repeat = \&repeat;
+sub try_repeat(&@)
+{
+   # defeat prototype
+   &repeat( @_, try => 1 );
+}
 
 =head2 $future = try_repeat_until_success { CODE } ...
 
@@ -385,7 +403,8 @@ sub try_repeat_until_success(&@)
    defined($args{while}) or defined($args{until})
       and croak "Cannot pass 'while' or 'until' to try_repeat_until_success";
 
-   try_repeat( $code, while => sub { shift->failure }, %args );
+   # defeat prototype
+   &try_repeat( $code, while => sub { shift->failure }, %args );
 }
 
 # Legacy name

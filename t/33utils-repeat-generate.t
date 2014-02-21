@@ -25,7 +25,7 @@ use Future::Utils qw( repeat );
    ok( !$future->is_ready, '$future not ready' );
 
    is( $arg, 2, '$arg 2 for second iteratoin' );
-   $trial_f->fail( "failure" );
+   $trial_f->done( "not yet" );
 
    ok( !$future->is_ready, '$future still not ready' );
 

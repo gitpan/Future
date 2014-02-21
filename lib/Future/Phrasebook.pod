@@ -243,9 +243,19 @@ Z<>
     F_TRIAL();
  } until => sub { shift->failure };
 
+When a repeat loop is required to retry a failure, the C<try_repeat> function
+should be used. Currently this function behaves equivalently to C<repeat>,
+except that it will not print a warning if it is asked to retry after a
+failure, whereas this behaviour is now deprecated for the regular C<repeat>
+function so that yields a warning.
+
+ my $f = try_repeat {
+    F_TRIAL();
+ } while => sub { shift->failure };
+
 Another variation is the C<try_repeat_until_success> function, which provides
-a convenient shortcut to calling C<repeat> with a condition that makes another
-attempt each time the previous one fails; stopping once it achieves a
+a convenient shortcut to calling C<try_repeat> with a condition that makes
+another attempt each time the previous one fails; stopping once it achieves a
 successful result.
 
  while(1) {

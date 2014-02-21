@@ -6,7 +6,7 @@ use warnings;
 use Test::More;
 
 use Future;
-use Future::Utils qw( repeat try_repeat_until_success );
+use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 
 # foreach without otherwise
 {
@@ -23,7 +23,7 @@ use Future::Utils qw( repeat try_repeat_until_success );
    ok( !$future->is_ready, '$future not ready' );
 
    is( $arg, "two", '$arg two for second iteration' );
-   $trial_f->fail( "failure" );
+   $trial_f->done( "another" );
 
    ok( !$future->is_ready, '$future not ready' );
 
@@ -58,7 +58,7 @@ use Future::Utils qw( repeat try_repeat_until_success );
 
 # foreach while
 {
-   my $future = repeat {
+   my $future = try_repeat {
       my $arg = shift;
       if( $arg eq "bad" ) {
          return Future->new->fail( "bad" );
@@ -74,7 +74,7 @@ use Future::Utils qw( repeat try_repeat_until_success );
 
 # foreach until
 {
-   my $future = repeat {
+   my $future = try_repeat {
       my $arg = shift;
       if( $arg eq "bad" ) {
          return Future->new->fail( "bad" );
@@ -116,7 +116,7 @@ use Future::Utils qw( repeat try_repeat_until_success );
 
 # main code dies
 {
-   my $future = repeat {
+   my $future = try_repeat {
       die "It failed\n";
    } foreach => [ 1, 2, 3 ];
 
