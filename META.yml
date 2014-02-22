@@ -3,26 +3,26 @@ abstract: 'represent an operation awaiting completion'
 author:
   - 'Paul Evans <leonerd@leonerd.org.uk>'
 build_requires:
-  Test::Fatal: 0
-  Test::Identity: 0
-  Test::More: 0.88
-  Test::Refcount: 0
+  Test::Fatal: '0'
+  Test::Identity: '0'
+  Test::More: '0.88'
+  Test::Refcount: '0'
 dynamic_config: 1
-generated_by: 'Module::Build version 0.4203, CPAN::Meta::Converter version 2.133380'
+generated_by: 'Module::Build version 0.4204, CPAN::Meta::Converter version 2.133380'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
-  version: 1.4
+  version: '1.4'
 name: Future
 provides:
   Future:
     file: lib/Future.pm
-    version: 0.24
+    version: '0.25'
   Future::Utils:
     file: lib/Future/Utils.pm
-    version: 0.24
+    version: '0.25'
 requires:
-  perl: 5.008
+  perl: '5.008'
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.24
+version: '0.25'
