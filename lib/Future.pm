@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.25';
+our $VERSION = '0.26';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed reftype );
@@ -244,11 +244,22 @@ END { $GLOBAL_END = 1; }
    warn "$self was $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
 } if DEBUG;
 
+=head2 $future = Future->done( @values )
+
+=head2 $future = Future->fail( $exception, @details )
+
+Shortcut wrappers around creating a new C<Future> then immediately marking it
+as done or failed.
+
 =head2 $future = Future->wrap( @values )
 
 If given a single argument which is already a C<Future> reference, this will
 be returned unmodified. Otherwise, returns a new C<Future> instance that is
 already complete, and will yield the given values.
+
+This will ensure that an incoming argument is definitely a C<Future>, and may
+be useful in such cases as adapting synchronous code to fit asynchronous
+libraries driven by C<Future>.
 
 =cut
 
@@ -261,7 +272,7 @@ sub wrap
       return $values[0];
    }
    else {
-      return $class->new->done( @values );
+      return $class->done( @values );
    }
 }
 
@@ -285,8 +296,8 @@ sub call
    my ( $code, @args ) = @_;
 
    my $f;
-   eval { $f = $code->( @args ); 1 } or $f = $class->new->fail( $@ );
-   blessed $f and $f->isa( "Future" ) or $f = $class->new->fail( "Expected code to return a Future" );
+   eval { $f = $code->( @args ); 1 } or $f = $class->fail( $@ );
+   blessed $f and $f->isa( "Future" ) or $f = $class->fail( "Expected " . CvNAME_FILE_LINE($code) . " to return a Future" );
 
    return $f;
 }
@@ -322,6 +333,13 @@ sub _mark_ready
       }
       elsif( $flags & (CB_SEQ_ONDONE|CB_SEQ_ONFAIL) ) {
          my ( undef, undef, $fseq ) = @$cb;
+         if( !$fseq ) { # weaken()ed; it might be gone now
+            # This warning should always be printed, even not in DEBUG mode.
+            # It's always an indication of a bug
+            Carp::carp +(DEBUG ? "$self ($self->{constructed_at})" : "$self" ) .
+               " lost a sequence Future";
+            next;
+         }
 
          my $f2;
          if( $done and $flags & CB_SEQ_ONDONE or
@@ -361,6 +379,7 @@ sub _mark_ready
          }
          else {
             push @{ $f2->{callbacks} }, [ CB_DONE|CB_FAIL, $fseq ];
+            weaken( $f2->{callbacks}[-1][1] );
          }
       }
       else {
@@ -376,6 +395,7 @@ sub _state
 {
    my $self = shift;
    return !$self->{ready}     ? "pending" :
+           DEBUG              ? $self->{ready_at} :
            $self->{failure}   ? "failed" :
            $self->{cancelled} ? "cancelled" :
                                 "done";
@@ -394,12 +414,17 @@ Marks that the leaf future is now ready, and provides a list of values as a
 result. (The empty list is allowed, and still indicates the future as ready).
 Cannot be called on a dependent future.
 
-Returns the C<$future> to allow easy chaining to create an immediate future by
-
- return Future->new->done( ... )
-
 If the future is already cancelled, this request is ignored. If the future is
 already complete with a result or a failure, an exception is thrown.
+
+=head2 Future->done( @result )
+
+May also be called as a class method, where it will construct a new Future and
+immediately mark it as done.
+
+Returns the C<$future> to allow easy chaining to create an immediate future by
+
+ return Future->done( ... )
 
 =cut
 
@@ -407,11 +432,24 @@ sub done
 {
    my $self = shift;
 
-   $self->{cancelled} and return $self;
-   $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->done";
-   $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
-   $self->{result} = [ @_ ];
-   $self->_mark_ready;
+   if( ref $self ) {
+      $self->{cancelled} and return $self;
+      $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->done";
+      $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
+      $self->{result} = [ @_ ];
+      $self->_mark_ready;
+   }
+   else {
+      $self = $self->new;
+      $self->{ready} = 1;
+      $self->{result} = [ @_ ];
+   }
+
+   if( DEBUG ) {
+      my $at = Carp::shortmess( "done" );
+      chomp $at; $at =~ s/\.$//;
+      $self->{ready_at} = $at;
+   }
 
    return $self;
 }
@@ -443,13 +481,18 @@ Further details may be provided that will be returned by the C<failure> method
 in list context. These details will not be part of the exception string raised
 by C<get>.
 
+If the future is already cancelled, this request is ignored. If the future is
+already complete with a result or a failure, an exception is thrown.
+
+=head2 Future->fail( $exception, @details )
+
+May also be called as a class method, where it will construct a new Future and
+immediately mark it as failed.
+
 Returns the C<$future> to allow easy chaining to create an immediate failed
 future by
 
- return Future->new->fail( ... )
-
-If the future is already cancelled, this request is ignored. If the future is
-already complete with a result or a failure, an exception is thrown.
+ return Future->fail( ... )
 
 =cut
 
@@ -458,12 +501,26 @@ sub fail
    my $self = shift;
    my ( $exception, @details ) = @_;
 
-   $self->{cancelled} and return $self;
-   $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->fail'ed";
-   $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
    $_[0] or Carp::croak "$self ->fail requires an exception that is true";
-   $self->{failure} = [ $exception, @details ];
-   $self->_mark_ready;
+
+   if( ref $self ) {
+      $self->{cancelled} and return $self;
+      $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->fail'ed";
+      $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
+      $self->{failure} = [ $exception, @details ];
+      $self->_mark_ready;
+   }
+   else {
+      $self = $self->new;
+      $self->{ready} = 1;
+      $self->{failure} = [ $exception, @details ];
+   }
+
+   if( DEBUG ) {
+      my $at = Carp::shortmess( "failed" );
+      chomp $at; $at =~ s/\.$//;
+      $self->{ready_at} = $at;
+   }
 
    return $self;
 }
@@ -668,6 +725,34 @@ sub get
    return @{ $self->{result} };
 }
 
+=head2 @values = Future->unwrap( @values )
+
+If given a single argument which is a C<Future> reference, this method will
+call C<get> on it and return the result. Otherwise, it returns the list of
+values directly in list context, or the first value in scalar. Since it
+involves an implicit C<await>, this method can only be used on immediate
+futures or subclasses that implement C<await>.
+
+This will ensure that an outgoing argument is definitely not a C<Future>, and
+may be useful in such cases as adapting synchronous code to fit asynchronous
+libraries that return C<Future> instances.
+
+=cut
+
+sub unwrap
+{
+   shift; # $class
+   my @values = @_;
+
+   if( @values == 1 and blessed $values[0] and $values[0]->isa( __PACKAGE__ ) ) {
+      return $values[0]->get;
+   }
+   else {
+      return $values[0] if !wantarray;
+      return @values;
+   }
+}
+
 =head2 $future->on_done( $code )
 
 If the future is not yet ready, adds a callback to be invoked when the future
@@ -705,6 +790,19 @@ sub on_done
    }
 
    return $self;
+}
+
+=head2 $failed = $future->is_failed
+
+Returns true on a future if it is ready and it failed. Returns false if it is
+still pending, completed successfully, or was cancelled.
+
+=cut
+
+sub is_failed
+{
+   my $self = shift;
+   return $self->{ready} && !!$self->{failure}; # boolify
 }
 
 =head2 $exception = $future->failure
@@ -811,6 +909,12 @@ sub cancel
    }
    $self->_mark_ready;
 
+   if( DEBUG ) {
+      my $at = Carp::shortmess( "cancelled" );
+      chomp $at; $at =~ s/\.$//;
+      $self->{ready_at} = $at;
+   }
+
    return $self;
 }
 
@@ -876,10 +980,10 @@ sub _sequence
                     $f1->failure and not( $flags & CB_SEQ_ONFAIL );
 
       if( $flags & CB_SEQ_IMDONE ) {
-         return Future->new->done( @$code );
+         return Future->done( @$code );
       }
       elsif( $flags & CB_SEQ_IMFAIL ) {
-         return Future->new->fail( @$code );
+         return Future->fail( @$code );
       }
 
       my @args = (
@@ -891,7 +995,7 @@ sub _sequence
 
       my $fseq;
       unless( eval { $fseq = $code->( @args ); 1 } ) {
-         return Future->new->fail( $@ );
+         return Future->fail( $@ );
       }
 
       unless( blessed $fseq and $fseq->isa( "Future" ) ) {
@@ -905,6 +1009,7 @@ sub _sequence
    $fseq->on_cancel( $f1 );
 
    push @{ $f1->{callbacks} }, [ CB_DONE|CB_FAIL|$flags, $code, $fseq ];
+   weaken( $f1->{callbacks}[-1][2] );
 
    return $fseq;
 }
@@ -1234,7 +1339,7 @@ sub wait_all
    my @subs = @_;
 
    unless( @subs ) {
-      my $self = Future->new->done;
+      my $self = Future->done;
       $self->{subs} = [];
       return $self;
    }
@@ -1291,7 +1396,7 @@ sub wait_any
    my @subs = @_;
 
    unless( @subs ) {
-      my $self = Future->new->fail( "Cannot ->wait_any with no subfutures" );
+      my $self = Future->fail( "Cannot ->wait_any with no subfutures" );
       $self->{subs} = [];
       return $self;
    }
@@ -1371,7 +1476,7 @@ sub needs_all
    my @subs = @_;
 
    unless( @subs ) {
-      my $self = Future->new->done;
+      my $self = Future->done;
       $self->{subs} = [];
       return $self;
    }
@@ -1462,7 +1567,7 @@ sub needs_any
    my @subs = @_;
 
    unless( @subs ) {
-      my $self = Future->new->fail( "Cannot ->needs_any with no subfutures" );
+      my $self = Future->fail( "Cannot ->needs_any with no subfutures" );
       $self->{subs} = [];
       return $self;
    }
@@ -1688,27 +1793,22 @@ methods.
 =head2 Immediate Futures
 
 Because the C<done> method returns the future object itself, it can be used to
-generate a C<Future> that is immediately ready with a result.
+generate a C<Future> that is immediately ready with a result. This can also be
+used as a class method.
 
- my $f = Future->new->done( $value );
-
-This is neater handled by the C<wrap> class method, which encapsulates its
-arguments in a new immediate C<Future>, except if it is given a single
-argument that is already a C<Future>:
-
- my $f = Future->wrap( $value );
+ my $f = Future->done( $value );
 
 Similarly, the C<fail> and C<die> methods can be used to generate a C<Future>
 that is immediately failed.
 
- my $f = Future->new->die( "This is never going to work" );
+ my $f = Future->die( "This is never going to work" );
 
 This could be considered similarly to a C<die> call.
 
 An C<eval{}> block can be used to turn a C<Future>-returning function that
 might throw an exception, into a C<Future> that would indicate this failure.
 
- my $f = eval { function() } || Future->new->fail( $@ );
+ my $f = eval { function() } || Future->fail( $@ );
 
 This is neater handled by the C<call> class method, which wraps the call in
 an C<eval{}> block and tests the result:

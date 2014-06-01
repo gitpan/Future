@@ -47,7 +47,7 @@ use Test::Identity;
 {
    my $f = t::Future::Subclass->new;
 
-   isa_ok( Future->new->done->followed_by( sub { $f } ),
+   isa_ok( Future->done->followed_by( sub { $f } ),
            "t::Future::Subclass",
            'imm->followed_by $f' );
 }
@@ -72,7 +72,7 @@ use Test::Identity;
            "t::Future::Subclass",
            'Future->needs_any( $f )' );
 
-   my $imm = Future->new->done;
+   my $imm = Future->done;
 
    isa_ok( Future->wait_all( $imm, $f ),
            "t::Future::Subclass",

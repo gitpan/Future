@@ -125,14 +125,14 @@ use Future;
 
 # immediately done
 {
-   my $future = Future->needs_any( Future->new->fail("F1"), Future->new->done );
+   my $future = Future->needs_any( Future->fail("F1"), Future->done );
 
    ok( $future->is_ready, '$future of already-done sub already ready' );
 }
 
 # immediately fails
 {
-   my $future = Future->needs_any( Future->new->fail("F1") );
+   my $future = Future->needs_any( Future->fail("F1") );
 
    ok( $future->is_ready, '$future of already-failed sub already ready' );
 }

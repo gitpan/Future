@@ -128,7 +128,7 @@ return an immediate C<Future> instance.
  my $f = F_FIRST()
     ->else( sub {
        ERROR( @_ );
-       return Future->new->done;
+       return Future->done;
     });
 
 Sometimes the failure handling code simply needs to be aware of the failure,
@@ -175,7 +175,7 @@ Z<>
  my $f = F_FIRST()
     ->else( sub {
        ERROR( @_ );
-       return Future->new->done;
+       return Future->done;
     })
     ->followed_by( sub {
        CLEANUP();
@@ -368,7 +368,7 @@ cancelled.
           if( $result ) {
              $escape_f->done( $item );
           }
-          return Future->new->done;
+          return Future->done;
        })
     } foreach => \@ITEMS )->then( sub {
        MAKE_NEW_ITEM();

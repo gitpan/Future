@@ -25,8 +25,7 @@ use Future;
    ok( defined $fseq, '$fseq defined' );
    isa_ok( $fseq, "Future", '$fseq' );
 
-   # Two refs; one in lexical $fseq, one via $f1
-   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   is_oneref( $fseq, '$fseq has refcount 1 initially' );
 
    ok( !$f2, '$f2 not yet defined before $f1 done' );
 
@@ -35,7 +34,7 @@ use Future;
    ok( defined $f2, '$f2 now defined after $f1 done' );
 
    undef $f1;
-   is_refcount( $fseq, 2, '$fseq has refcount 2 after $f1 done and dropped' );
+   is_oneref( $fseq, '$fseq has refcount 1 after $f1 done and dropped' );
 
    ok( !$fseq->is_ready, '$fseq not yet done before $f2 done' );
 
@@ -96,7 +95,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->done( "Result" );
+   my $f1 = Future->done( "Result" );
 
    my $f2;
    my $fseq = $f1->then(
@@ -113,7 +112,7 @@ use Future;
 
 # immediately fail
 {
-   my $f1 = Future->new->fail( "Failure\n" );
+   my $f1 = Future->fail( "Failure\n" );
 
    my $fseq = $f1->then(
       sub { die "then of immediately-failed future should not be invoked" }
@@ -164,12 +163,25 @@ use Future;
    ok( $f2->is_cancelled, '$f2 cancelled by $fseq cancel' );
 }
 
+# then dropping $fseq doesn't fail ->done
+{
+   local $SIG{__WARN__} = sub {};
+
+   my $f1 = Future->new;
+   my $fseq = $f1->then( sub { return Future->done() } );
+
+   undef $fseq;
+
+   is( exception { $f1->done; }, undef,
+      'Dropping $fseq does not cause $f1->done to die' );
+}
+
 # Void context raises a warning
 {
    my $warnings;
    local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   Future->new->done->then(
+   Future->done->then(
       sub { Future->new }
    );
    like( $warnings,

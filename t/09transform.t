@@ -64,7 +64,7 @@ use Future;
    my $warnings;
    local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   Future->new->done->transform(
+   Future->done->transform(
       done => sub { }
    );
    like( $warnings,

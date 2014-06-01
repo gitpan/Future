@@ -84,7 +84,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
 
    my $future = Future->wait_all( $f1 );
 
@@ -95,7 +95,7 @@ use Future;
 
 # one immediately done
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
    my $f2 = Future->new;
 
    my $future = Future->wait_all( $f1, $f2 );

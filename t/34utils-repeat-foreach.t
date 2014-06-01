@@ -38,20 +38,20 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 {
    my $last_trial_f;
    my $future = repeat {
-      Future->new->done( "ignore me $_[0]" );
+      Future->done( "ignore me $_[0]" );
    } foreach => [qw( one two three )],
      otherwise => sub {
         $last_trial_f = shift;
-        return Future->new->fail( "Nothing succeeded\n" );
+        return Future->fail( "Nothing succeeded\n" );
      };
 
    is( scalar $future->failure, "Nothing succeeded\n", '$future returns otherwise failure' );
    is( scalar $last_trial_f->get, "ignore me three", '$last_trial_f->get' );
 
    $future = repeat {
-      Future->new->done( "ignore me" );
+      Future->done( "ignore me" );
    } foreach => [],
-     otherwise => sub { Future->new->fail( "Nothing to do\n" ) };
+     otherwise => sub { Future->fail( "Nothing to do\n" ) };
 
    is( scalar $future->failure, "Nothing to do\n", '$future returns otherwise failure for empty list' );
 }
@@ -61,10 +61,10 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    my $future = try_repeat {
       my $arg = shift;
       if( $arg eq "bad" ) {
-         return Future->new->fail( "bad" );
+         return Future->fail( "bad" );
       }
       else {
-         return Future->new->done( $arg );
+         return Future->done( $arg );
       }
    } foreach => [qw( bad good not-attempted )],
      while => sub { shift->failure };
@@ -77,10 +77,10 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    my $future = try_repeat {
       my $arg = shift;
       if( $arg eq "bad" ) {
-         return Future->new->fail( "bad" );
+         return Future->fail( "bad" );
       }
       else {
-         return Future->new->done( $arg );
+         return Future->done( $arg );
       }
    } foreach => [qw( bad good not-attempted )],
      until => sub { !shift->failure };
@@ -91,10 +91,10 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 # foreach while + otherwise
 {
    my $future = repeat {
-      Future->new->done( $_[0] );
+      Future->done( $_[0] );
    } foreach => [ 1, 2, 3 ],
      while => sub { $_[0]->get < 2 },
-     otherwise => sub { Future->new->fail( "Failed to find 2" ) };
+     otherwise => sub { Future->fail( "Failed to find 2" ) };
 
    is( scalar $future->get, 2, '$future->get returns successful result from while + otherwise' );
 }
@@ -104,10 +104,10 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    my $future = try_repeat_until_success {
       my $arg = shift;
       if( $arg eq "bad" ) {
-         return Future->new->fail( "bad" );
+         return Future->fail( "bad" );
       }
       else {
-         return Future->new->done( $arg );
+         return Future->done( $arg );
       }
    } foreach => [qw( bad good not-attempted )];
 
@@ -126,7 +126,7 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
 # otherwise code dies
 {
    my $future = repeat {
-      Future->new->done;
+      Future->done;
    } foreach => [],
      otherwise => sub { die "It failed finally\n" };
 

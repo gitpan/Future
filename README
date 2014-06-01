@@ -134,10 +134,19 @@ CONSTRUCTORS
     This constructor would primarily be used by implementations of
     asynchronous interfaces.
 
+  $future = Future->done( @values )
+  $future = Future->fail( $exception, @details )
+    Shortcut wrappers around creating a new `Future' then immediately
+    marking it as done or failed.
+
   $future = Future->wrap( @values )
     If given a single argument which is already a `Future' reference, this
     will be returned unmodified. Otherwise, returns a new `Future' instance
     that is already complete, and will yield the given values.
+
+    This will ensure that an incoming argument is definitely a `Future', and
+    may be useful in such cases as adapting synchronous code to fit
+    asynchronous libraries driven by `Future'.
 
   $future = Future->call( \&code, @args )
     A convenient wrapper for calling a `CODE' reference that is expected to
@@ -159,14 +168,18 @@ IMPLEMENTATION METHODS
     as a result. (The empty list is allowed, and still indicates the future
     as ready). Cannot be called on a dependent future.
 
-    Returns the `$future' to allow easy chaining to create an immediate
-    future by
-
-     return Future->new->done( ... )
-
     If the future is already cancelled, this request is ignored. If the
     future is already complete with a result or a failure, an exception is
     thrown.
+
+  Future->done( @result )
+    May also be called as a class method, where it will construct a new
+    Future and immediately mark it as done.
+
+    Returns the `$future' to allow easy chaining to create an immediate
+    future by
+
+     return Future->done( ... )
 
   $code = $future->done_cb
     Returns a `CODE' reference that, when invoked, calls the `done' method.
@@ -185,14 +198,18 @@ IMPLEMENTATION METHODS
     `failure' method in list context. These details will not be part of the
     exception string raised by `get'.
 
-    Returns the `$future' to allow easy chaining to create an immediate
-    failed future by
-
-     return Future->new->fail( ... )
-
     If the future is already cancelled, this request is ignored. If the
     future is already complete with a result or a failure, an exception is
     thrown.
+
+  Future->fail( $exception, @details )
+    May also be called as a class method, where it will construct a new
+    Future and immediately mark it as failed.
+
+    Returns the `$future' to allow easy chaining to create an immediate
+    failed future by
+
+     return Future->fail( ... )
 
   $code = $future->fail_cb
     Returns a `CODE' reference that, when invoked, calls the `fail' method.
@@ -278,6 +295,17 @@ USER METHODS
     method then this is used to wait for the future to be ready, before
     returning the result or propagating its failure exception.
 
+  @values = Future->unwrap( @values )
+    If given a single argument which is a `Future' reference, this method
+    will call `get' on it and return the result. Otherwise, it returns the
+    list of values directly in list context, or the first value in scalar.
+    Since it involves an implicit `await', this method can only be used on
+    immediate futures or subclasses that implement `await'.
+
+    This will ensure that an outgoing argument is definitely not a `Future',
+    and may be useful in such cases as adapting synchronous code to fit
+    asynchronous libraries that return `Future' instances.
+
   $future->on_done( $code )
     If the future is not yet ready, adds a callback to be invoked when the
     future is ready, if it completes successfully. If the future completed
@@ -293,6 +321,10 @@ USER METHODS
   $future->on_done( $f )
     If passed another `Future' instance, the passed instance will have its
     `done' method invoked when the original future completes successfully.
+
+  $failed = $future->is_failed
+    Returns true on a future if it is ready and it failed. Returns false if
+    it is still pending, completed successfully, or was cancelled.
 
   $exception = $future->failure
   $exception, @details = $future->failure
@@ -671,19 +703,14 @@ EXAMPLES
   Immediate Futures
     Because the `done' method returns the future object itself, it can be
     used to generate a `Future' that is immediately ready with a result.
+    This can also be used as a class method.
 
-     my $f = Future->new->done( $value );
-
-    This is neater handled by the `wrap' class method, which encapsulates
-    its arguments in a new immediate `Future', except if it is given a
-    single argument that is already a `Future':
-
-     my $f = Future->wrap( $value );
+     my $f = Future->done( $value );
 
     Similarly, the `fail' and `die' methods can be used to generate a
     `Future' that is immediately failed.
 
-     my $f = Future->new->die( "This is never going to work" );
+     my $f = Future->die( "This is never going to work" );
 
     This could be considered similarly to a `die' call.
 
@@ -691,7 +718,7 @@ EXAMPLES
     might throw an exception, into a `Future' that would indicate this
     failure.
 
-     my $f = eval { function() } || Future->new->fail( $@ );
+     my $f = eval { function() } || Future->fail( $@ );
 
     This is neater handled by the `call' class method, which wraps the call
     in an `eval{}' block and tests the result:

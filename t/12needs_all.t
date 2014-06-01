@@ -90,14 +90,14 @@ use Future;
 
 # immediately done
 {
-   my $future = Future->needs_all( Future->new->done );
+   my $future = Future->needs_all( Future->done );
 
    ok( $future->is_ready, '$future of already-done sub already ready' );
 }
 
 # immediately fails
 {
-   my $future = Future->needs_all( Future->new->fail("F1"), Future->new->done );
+   my $future = Future->needs_all( Future->fail("F1"), Future->done );
 
    ok( $future->is_ready, '$future of already-failed sub already ready' );
 }

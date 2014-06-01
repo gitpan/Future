@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 3;
+use Test::More;
 
 BEGIN {
    $ENV{PERL_FUTURE_DEBUG} = 1;
@@ -39,3 +39,16 @@ like( warnings {
    },
    qr/^Future=\S+ was constructed at \Q$0\E line $LINE and was lost near \Q$0\E line $LOSTLINE before it was ready\.$/,
    'Lost Future raises a warning' );
+
+my $THENLINE;
+my $SEQLINE;
+like( warnings {
+      $LINE = __LINE__; my $f1 = Future->new;
+      $THENLINE = __LINE__; my $fseq = $f1->then( sub { } ); undef $fseq;
+      $SEQLINE = __LINE__; $f1->done;
+   },
+   qr/^Future=\S+ was constructed at \Q$0\E line $THENLINE and was lost near \Q$0\E line $SEQLINE before it was ready\.
+Future=\S+ \(constructed at \Q$0\E line $LINE\) lost a sequence Future at \Q$0\E line $SEQLINE\.$/,
+   'Lost sequence Future raises warning' );
+
+done_testing;

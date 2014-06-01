@@ -36,7 +36,8 @@ use Future::Utils qw( call );
    };
 
    ok( $f->is_ready, 'call() returns immediate future on non-future return' );
-   is( scalar $f->failure, "Expected code to return a Future", 'failure from immediate future on non-future return' );
+   like( scalar $f->failure, qr/^Expected __ANON__.*\(\S+ line \d+\) to return a Future$/,
+      'failure from immediate future on non-future return' );
 }
 
 done_testing;

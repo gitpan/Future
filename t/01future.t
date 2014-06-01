@@ -37,6 +37,7 @@ use Future;
 
    ok( $future->is_ready, '$future is now ready' );
    ok( $future->is_done, '$future is done' );
+   ok( !$future->is_failed, '$future is not failed' );
    is_deeply( [ $future->get ], [ result => "here" ], 'Results from $future->get' );
    is( scalar $future->get, "result", 'Result from scalar $future->get' );
 
@@ -100,8 +101,7 @@ use Future;
 
 # immediately done
 {
-   my $future = Future->new;
-   $future->done( already => "done" );
+   my $future = Future->done( already => "done" );
 
    my @on_done_args;
    identical( $future->on_done( sub { @on_done_args = @_; } ), $future, '->on_done returns future for immediate' );
@@ -137,6 +137,7 @@ use Future;
 
    ok( $future->is_ready, '$future->fail marks future ready' );
    ok( !$future->is_done, '$future->fail does not mark future done' );
+   ok( $future->is_failed, '$future->fail marks future as failed' );
 
    is( scalar $future->failure, "Something broke", '$future->failure yields exception' );
    my $file = __FILE__;
@@ -195,8 +196,7 @@ use Future;
 
 # immediately failed
 {
-   my $future = Future->new;
-   $future->fail( "Already broken" );
+   my $future = Future->fail( "Already broken" );
 
    my $on_done;
    identical( $future->on_done( sub { $on_done++; } ), $future, '->on_done returns future for immediate' );
@@ -242,7 +242,7 @@ use Future;
 {
    my $future;
 
-   $future = Future->call( sub { Future->new->done( @_ ) }, 1, 2, 3 );
+   $future = Future->call( sub { Future->done( @_ ) }, 1, 2, 3 );
 
    ok( $future->is_ready, '$future->is_ready from immediate Future->call' );
    is_deeply( [ $future->get ], [ 1, 2, 3 ], '$future->get from immediate Future->call' );
@@ -255,7 +255,25 @@ use Future;
    $future = Future->call( sub { "non-future" } );
 
    ok( $future->is_ready, '$future->is_ready from non-future returning Future->call' );
-   is( $future->failure, "Expected code to return a Future", '$future->failure from non-future returning Future->call' );
+   like( $future->failure, qr/^Expected __ANON__.*\(\S+ line \d+\) to return a Future$/,
+      '$future->failure from non-future returning Future->call' );
+}
+
+# unwrap
+{
+   is_deeply( [ Future->unwrap( Future->done( 1, 2, 3 ) ) ],
+              [ 1, 2, 3 ],
+              'Future->unwrap Future in list context' );
+   is_deeply( [ Future->unwrap( 1, 2, 3 ) ],
+              [ 1, 2, 3 ],
+              'Future->unwrap plain list in list context' );
+
+   is( scalar Future->unwrap( Future->done( qw( a b c ) ) ),
+       "a",
+       'Future->unwrap Future in scalar context' );
+   is( scalar Future->unwrap( qw( a b c ) ),
+       "a",
+       'Future->unwrap plain list in scalar context' );
 }
 
 done_testing;

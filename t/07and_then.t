@@ -44,7 +44,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
 
    my $called = 0;
    my $fseq = $f1->and_then(
@@ -57,7 +57,7 @@ use Future;
 
 # immediately fail
 {
-   my $f1 = Future->new->fail("Failure\n");
+   my $f1 = Future->fail("Failure\n");
 
    my $called = 0;
    my $fseq = $f1->and_then(
@@ -73,7 +73,7 @@ use Future;
    my $warnings;
    local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   Future->new->done->and_then(
+   Future->done->and_then(
       sub { Future->new }
    );
 

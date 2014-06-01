@@ -88,7 +88,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
 
    my $future = Future->wait_any( $f1 );
 

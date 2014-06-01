@@ -1,5 +1,20 @@
 Revision history for Future
 
+0.26    2014/06/01 12:52:53
+        [CHANGES]
+         * Added ->is_failed accessor
+         * Implement ->export_to_level in Future::Utils
+         * Print a warning about lost sequence Futures
+         * Allow Future->done and Future->fail as simple class constructors
+           to return immediates
+         * Added Future->unwrap
+
+        [BUGFIXES]
+         * Ensure that sequence futures are weaken()ed in the forward
+           direction.
+           **NOTE** This will potentially break existing code that depended on
+             strong references. This old code was, however, broken.
+
 0.25    2014/02/22 03:47:08
         [BUGFIXES]
          * Fix warning-matching test in unit test for both older and newer

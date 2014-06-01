@@ -8,9 +8,14 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.25';
+our $VERSION = '0.26';
 
 use Exporter 'import';
+# Can't import the one from Exporter as it relies on package inheritance
+sub export_to_level
+{
+   my $pkg = shift; local $Exporter::ExportLevel = 1 + shift; $pkg->import(@_);
+}
 
 our @EXPORT_OK = qw(
    call
@@ -613,7 +618,7 @@ sub fmap_concat(&@)
    my %args = @_;
 
    _fmap( $code, %args, collect => "array" )->then( sub {
-      return Future->new->done( map { @$_ } @_ );
+      return Future->done( map { @$_ } @_ );
    });
 }
 *fmap = \&fmap_concat;

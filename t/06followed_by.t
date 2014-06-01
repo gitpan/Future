@@ -23,8 +23,7 @@ use Future;
    ok( defined $fseq, '$fseq defined' );
    isa_ok( $fseq, "Future", '$fseq' );
 
-   # Two refs; one in lexical $fseq, one via $f1
-   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   is_oneref( $fseq, '$fseq has refcount 1 initially' );
    # Two refs; one in lexical $f1, one in $fseq's cancellation closure
    is_refcount( $f1, 2, '$f1 has refcount 2 initially' );
 
@@ -54,8 +53,7 @@ use Future;
    ok( defined $fseq, '$fseq defined' );
    isa_ok( $fseq, "Future", '$fseq' );
 
-   # Two refs; one in lexical $fseq, one via $f1
-   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   is_oneref( $fseq, '$fseq has refcount 1 initially' );
 
    is( $called, 0, '$called before $f1 done' );
 
@@ -105,7 +103,7 @@ use Future;
 
    ok( $f2->is_cancelled, '$f2 cancelled by $fseq->cancel' );
 
-   $f1 = Future->new->done;
+   $f1 = Future->done;
    $f2 = Future->new;
 
    $fseq = $f1->followed_by( sub { $f2 } );
@@ -117,7 +115,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
 
    my $called = 0;
    my $fseq = $f1->followed_by(
@@ -129,7 +127,7 @@ use Future;
 
 # immediately done
 {
-   my $f1 = Future->new->fail("Failure\n");
+   my $f1 = Future->fail("Failure\n");
 
    my $called = 0;
    my $fseq = $f1->followed_by(
@@ -141,7 +139,7 @@ use Future;
 
 # immediately code dies
 {
-   my $f1 = Future->new->done;
+   my $f1 = Future->done;
 
    my $fseq;
 
@@ -160,7 +158,7 @@ use Future;
    my $warnings;
    local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   Future->new->done->followed_by(
+   Future->done->followed_by(
       sub { Future->new }
    );
 

@@ -41,20 +41,20 @@ use Future::Utils qw( repeat );
    my $last_trial_f;
    my $i = 0;
    my $future = repeat {
-      Future->new->done( "ignore me $_[0]" );
+      Future->done( "ignore me $_[0]" );
    } generate => sub { $i < 3 ? ++$i : () },
      otherwise => sub {
         $last_trial_f = shift;
-        return Future->new->fail( "Nothing succeeded\n" );
+        return Future->fail( "Nothing succeeded\n" );
      };
 
    is( scalar $future->failure, "Nothing succeeded\n", '$future returns otherwise failure' );
    is( scalar $last_trial_f->get, "ignore me 3", '$last_trial_f->get' );
 
    $future = repeat {
-      Future->new->done( "ignore me" );
+      Future->done( "ignore me" );
    } generate => sub { () },
-     otherwise => sub { Future->new->fail( "Nothing to do\n" ) };
+     otherwise => sub { Future->fail( "Nothing to do\n" ) };
 
    is( scalar $future->failure, "Nothing to do\n", '$future returns otherwise failure for empty generator' );
 }

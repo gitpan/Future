@@ -115,7 +115,7 @@ use Future::Utils qw( fmap_void );
 # fmap_void on immediates
 {
    my $future = fmap_void {
-      return Future->new->done
+      return Future->done
    } foreach => [ 0 .. 2 ];
 
    ok( $future->is_ready, '$future already ready for fmap on immediates' );
@@ -123,7 +123,7 @@ use Future::Utils qw( fmap_void );
 
 # fmap_void on non/immediate mix
 {
-   my @item_f = ( my $item = Future->new, Future->new->done, Future->new->done );
+   my @item_f = ( my $item = Future->new, Future->done, Future->done );
    my $future = fmap_void {
       return $_[0];
    } foreach => \@item_f,
@@ -158,7 +158,7 @@ use Future::Utils qw( fmap_void );
    my @subf;
    my $future = fmap_void {
       if( $_[0] eq "fail" ) {
-         return Future->new->fail( "failure" );
+         return Future->fail( "failure" );
       }
       else {
          $subf[$_[0]] = Future->new;
@@ -191,7 +191,7 @@ use Future::Utils qw( fmap_void );
 # fmap_void return
 {
    my $future = fmap_void {
-      return Future->new->done;
+      return Future->done;
    } foreach => [ 0 ], return => my $ret = Future->new;
 
    identical( $future, $ret, 'repeat with return yields correct instance' );

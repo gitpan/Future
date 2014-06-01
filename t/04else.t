@@ -21,8 +21,7 @@ use Future;
    ok( defined $fseq, '$fseq defined' );
    isa_ok( $fseq, "Future", '$fseq' );
 
-   # Two refs; one in lexical $fseq, one via $f1
-   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   is_oneref( $fseq, '$fseq has refcount 1 initially' );
 
    $f1->done( results => "here" );
 
@@ -47,14 +46,14 @@ use Future;
    ok( defined $fseq, '$fseq defined' );
    isa_ok( $fseq, "Future", '$fseq' );
 
-   is_refcount( $fseq, 2, '$fseq has refcount 2 initially' );
+   is_oneref( $fseq, '$fseq has refcount 1 initially' );
 
    ok( !$f2, '$f2 not yet defined before $f1 fails' );
 
    $f1->fail( "f1 failure\n" );
 
    undef $f1;
-   is_refcount( $fseq, 2, '$fseq has refcount 2 after $f1 fail and dropped' );
+   is_oneref( $fseq, '$fseq has refcount 1 after $f1 fail and dropped' );
 
    ok( defined $f2, '$f2 now defined after $f1 fails' );
 
@@ -100,7 +99,7 @@ use Future;
 
 # immediate fail
 {
-   my $f1 = Future->new->fail( "Failure\n" );
+   my $f1 = Future->fail( "Failure\n" );
 
    my $f2;
    my $fseq = $f1->else(
@@ -117,7 +116,7 @@ use Future;
 
 # immediate done
 {
-   my $f1 = Future->new->done( "It works" );
+   my $f1 = Future->done( "It works" );
 
    my $fseq = $f1->else(
       sub { die "else block invoked for immediate done Future" }
@@ -151,7 +150,7 @@ use Future;
    my $warnings;
    local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
 
-   Future->new->done->else(
+   Future->done->else(
       sub { Future->new }
    );
    like( $warnings,
