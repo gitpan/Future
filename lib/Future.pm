@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.26';
+our $VERSION = '0.27';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed reftype );

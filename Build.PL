@@ -57,6 +57,7 @@ my $build = Module::Build->new(
    },
    requires => {
       'perl' => '5.008', # fails on 5.6 smokers; no idea why
+      'Carp' => '1.25', # new message format with trailing period
    },
    auto_configure_requires => 0, # Don't add M::B to configure_requires
    license => 'perl',

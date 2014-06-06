@@ -1,5 +1,10 @@
 Revision history for Future
 
+0.27    2014/06/06 17:42:27
+        [BUGFIXES]
+         * Depend on Carp 1.25 for the new message format with trailing
+           period, so tests work
+
 0.26    2014/06/01 12:52:53
         [CHANGES]
          * Added ->is_failed accessor
