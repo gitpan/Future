@@ -276,4 +276,13 @@ use Future;
        'Future->unwrap plain list in scalar context' );
 }
 
+# label
+{
+   my $f = Future->new;
+
+   identical( $f->set_label( "the label" ), $f, '->set_label returns $f' );
+
+   is( $f->label, "the label", '->label returns the label' );
+}
+
 done_testing;

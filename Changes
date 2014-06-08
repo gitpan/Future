@@ -1,5 +1,11 @@
 Revision history for Future
 
+0.28    2014/06/08 22:43:40
+        [CHANGES]
+         * Added ->label
+         * Added ->btime, rtime, elapsed tracing timers
+         * Better handling of 'breaks' version detection
+
 0.27    2014/06/06 17:42:27
         [BUGFIXES]
          * Depend on Carp 1.25 for the new message format with trailing

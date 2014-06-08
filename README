@@ -604,6 +604,32 @@ METHODS ON DEPENDENT FUTURES
     component futures. In scalar context, each will yield the number of such
     component futures.
 
+TRACING METHODS
+  $future = $future->set_label( $label )
+  $label = $future->label
+    Chaining mutator and accessor for the label of the `Future'. This should
+    be a plain string value, whose value will be stored by the future
+    instance for use in debugging messages or other tooling, or similar
+    purposes.
+
+  [ $sec, $usec ] = $future->btime
+  [ $sec, $usec ] = $future->rtime
+    Accessors that return the tracing timestamps from the instance. These
+    give the time the instance was contructed ("birth" time, `btime') and
+    the time the result was determined (the "ready" time, `rtime'). Each
+    result is returned as a two-element ARRAY ref, containing the epoch time
+    in seconds and microseconds, as given by `Time::HiRes::gettimeofday'.
+
+    In order for these times to be captured, they have to be enabled by
+    setting `$Future::TIMES' to a true value. This is initialised true at
+    the time the module is loaded if either `PERL_FUTURE_DEBUG' or
+    `PERL_FUTURE_TIMES' are set in the environment.
+
+  $sec = $future->elapsed
+    If both tracing timestamps are defined, returns the number of seconds of
+    elapsed time between them as a floating-point number. If not, returns
+    `undef'.
+
 EXAMPLES
     The following examples all demonstrate possible uses of a `Future'
     object to provide a fictional asynchronous API.

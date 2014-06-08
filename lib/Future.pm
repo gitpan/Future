@@ -9,11 +9,12 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.27';
+our $VERSION = '0.28';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed reftype );
 use B qw( svref_2object );
+use Time::HiRes qw( gettimeofday tv_interval );
 
 # we are not overloaded, but we want to check if other objects are
 require overload;
@@ -21,6 +22,8 @@ require overload;
 our @CARP_NOT = qw( Future::Utils );
 
 use constant DEBUG => $ENV{PERL_FUTURE_DEBUG};
+
+our $TIMES = DEBUG || $ENV{PERL_FUTURE_TIMES};
 
 =head1 NAME
 
@@ -224,6 +227,9 @@ sub new
                 chomp $at; $at =~ s/\.$//;
                 constructed_at => $at } )
          : () ),
+      ( $TIMES ?
+         ( btime => [ gettimeofday ] )
+         : () ),
    }, ( ref $proto || $proto );
 }
 
@@ -241,7 +247,7 @@ END { $GLOBAL_END = 1; }
    # a variable set to 'undef' or close of scope, because caller can't see it;
    # the current op has already been updated. The best we can do is indicate
    # 'near'.
-   warn "$self was $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
+   warn "${\$self->__selfstr} was $self->{constructed_at} and was lost near $lost_at before it was ready.\n";
 } if DEBUG;
 
 =head2 $future = Future->done( @values )
@@ -307,6 +313,10 @@ sub _mark_ready
    my $self = shift;
    $self->{ready} = 1;
 
+   if( $TIMES ) {
+      $self->{rtime} = [ gettimeofday ];
+   }
+
    delete $self->{on_cancel};
    my $callbacks = delete $self->{callbacks} or return;
 
@@ -336,7 +346,8 @@ sub _mark_ready
          if( !$fseq ) { # weaken()ed; it might be gone now
             # This warning should always be printed, even not in DEBUG mode.
             # It's always an indication of a bug
-            Carp::carp +(DEBUG ? "$self ($self->{constructed_at})" : "$self" ) .
+            Carp::carp +(DEBUG ? "${\$self->__selfstr} ($self->{constructed_at})"
+                               : "${\$self->__selfstr} $self" ) .
                " lost a sequence Future";
             next;
          }
@@ -434,8 +445,8 @@ sub done
 
    if( ref $self ) {
       $self->{cancelled} and return $self;
-      $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->done";
-      $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->done";
+      $self->{ready} and Carp::croak "${\$self->__selfstr} is already ".$self->_state." and cannot be ->done";
+      $self->{subs} and Carp::croak "${\$self->__selfstr} is not a leaf Future, cannot be ->done";
       $self->{result} = [ @_ ];
       $self->_mark_ready;
    }
@@ -505,8 +516,8 @@ sub fail
 
    if( ref $self ) {
       $self->{cancelled} and return $self;
-      $self->{ready} and Carp::croak "$self is already ".$self->_state." and cannot be ->fail'ed";
-      $self->{subs} and Carp::croak "$self is not a leaf Future, cannot be ->fail'ed";
+      $self->{ready} and Carp::croak "${\$self->__selfstr} is already ".$self->_state." and cannot be ->fail'ed";
+      $self->{subs} and Carp::croak "${\$self->__selfstr} is not a leaf Future, cannot be ->fail'ed";
       $self->{failure} = [ $exception, @details ];
       $self->_mark_ready;
    }
@@ -720,7 +731,7 @@ sub get
       my $exception = $self->{failure}->[0];
       !ref $exception && $exception =~ m/\n$/ ? CORE::die $exception : Carp::croak $exception;
    }
-   $self->{cancelled} and Carp::croak "$self was cancelled";
+   $self->{cancelled} and Carp::croak "${\$self->__selfstr} was cancelled";
    return $self->{result}->[0] unless wantarray;
    return @{ $self->{result} };
 }
@@ -1690,6 +1701,82 @@ sub cancelled_futures
    my $self = shift;
    $self->{subs} or Carp::croak "Cannot call ->cancelled_futures on a non-dependent Future";
    return grep { $_->{ready} and $_->{cancelled} } @{ $self->{subs} };
+}
+
+=head1 TRACING METHODS
+
+=head2 $future = $future->set_label( $label )
+
+=head2 $label = $future->label
+
+Chaining mutator and accessor for the label of the C<Future>. This should be a
+plain string value, whose value will be stored by the future instance for use
+in debugging messages or other tooling, or similar purposes.
+
+=cut
+
+sub set_label
+{
+   my $self = shift;
+   ( $self->{label} ) = @_;
+   return $self;
+}
+
+sub label
+{
+   my $self = shift;
+   return $self->{label};
+}
+
+sub __selfstr
+{
+   my $self = shift;
+   return "$self" unless defined $self->{label};
+   return "$self (\"$self->{label}\")";
+}
+
+=head2 [ $sec, $usec ] = $future->btime
+
+=head2 [ $sec, $usec ] = $future->rtime
+
+Accessors that return the tracing timestamps from the instance. These give the
+time the instance was contructed ("birth" time, C<btime>) and the time the
+result was determined (the "ready" time, C<rtime>). Each result is returned as
+a two-element ARRAY ref, containing the epoch time in seconds and
+microseconds, as given by C<Time::HiRes::gettimeofday>.
+
+In order for these times to be captured, they have to be enabled by setting
+C<$Future::TIMES> to a true value. This is initialised true at the time the
+module is loaded if either C<PERL_FUTURE_DEBUG> or C<PERL_FUTURE_TIMES> are
+set in the environment.
+
+=cut
+
+sub btime
+{
+   my $self = shift;
+   return $self->{btime};
+}
+
+sub rtime
+{
+   my $self = shift;
+   return $self->{rtime};
+}
+
+=head2 $sec = $future->elapsed
+
+If both tracing timestamps are defined, returns the number of seconds of
+elapsed time between them as a floating-point number. If not, returns
+C<undef>.
+
+=cut
+
+sub elapsed
+{
+   my $self = shift;
+   return undef unless defined $self->{btime} and defined $self->{rtime};
+   return $self->{elapsed} ||= tv_interval( $self->{btime}, $self->{rtime} );
 }
 
 =head1 EXAMPLES

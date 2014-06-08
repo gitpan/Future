@@ -11,6 +11,8 @@ BEGIN {
 
 use Future;
 
+use Time::HiRes qw( gettimeofday tv_interval );
+
 my $LINE;
 my $LOSTLINE;
 
@@ -50,5 +52,25 @@ like( warnings {
    qr/^Future=\S+ was constructed at \Q$0\E line $THENLINE and was lost near \Q$0\E line $SEQLINE before it was ready\.
 Future=\S+ \(constructed at \Q$0\E line $LINE\) lost a sequence Future at \Q$0\E line $SEQLINE\.$/,
    'Lost sequence Future raises warning' );
+
+{
+   local $Future::TIMES = 1;
+
+   my $before = [ gettimeofday ];
+
+   my $future = Future->new;
+
+   ok( defined $future->btime, '$future has btime with $TIMES=1' );
+   ok( tv_interval( $before, $future->btime ) >= 0, '$future btime is not earlier than $before' );
+
+   $future->done;
+
+   ok( defined $future->rtime, '$future has rtime with $TIMES=1' );
+   ok( tv_interval( $future->btime, $future->rtime ) >= 0, '$future rtime is not earlier than btime' );
+   ok( tv_interval( $future->rtime ) >= 0, '$future rtime is not later than now' );
+
+   ok( defined $future->elapsed, '$future has ->elapsed time' );
+   ok( $future->elapsed >= 0, '$future elapsed time >= 0' );
+}
 
 done_testing;

@@ -19,7 +19,7 @@ my %FIXED = (
    'Net::Async::WebSocket' => '0.08',
 );
 
-my $abort;
+my $printed;
 foreach my $module ( sort keys %FIXED ) {
    my $needsver = $FIXED{$module};
    ( my $modfile = "$module.pm" ) =~ s{::}{/}g;
@@ -28,23 +28,22 @@ foreach my $module ( sort keys %FIXED ) {
    next if ( my $instver = $module->VERSION ) >= $needsver;
 
    print STDERR "Installing this version of Future will fix a bug that the following installed\n".
-                "modules rely on. You must upgrade these modules to a later version before\n".
-                "Future can be installed.\n\n" unless $abort;
+                "modules rely on. You must upgrade these modules to a later version after\n".
+                "Future is installed, or they will not work correctly.\n\n" unless $printed;
 
    print STDERR "  * $module (installed $instver; need at least $needsver)\n";
-   $abort++;
+   $printed++;
 }
+print STDERR "\n" if $printed;
 
-if( $abort ) {
-   print STDERR "\n";
+if( $printed and -t STDIN ) {
+   # Attended update; might as well ask the user to confirm and exit if not
+   print STDERR "Are you still sure you wish to go ahead with this upgrade?\n";
+   print STDERR "[enter 'yes' to continue]: ";
 
-   grep { $_ eq "--force" } @ARGV or
-      die "OS unsupported - please try again after upgrading the modules listed above\n".
-          "\n".
-          "Or run as  Build.PL --force  to ignore this and continue anyway\n";
+   my $reply = <STDIN>;
 
-   print STDERR "******\n\nGoing ahead anyway as --force was given; the above modules -will- now be broken\n\n******\n";
-   @ARGV = grep { $_ ne "--force" } @ARGV;
+   die "Aborting install due to broken dependent modules\n" unless $reply =~ m/^y/i;
 }
 
 my $build = Module::Build->new(
@@ -58,6 +57,16 @@ my $build = Module::Build->new(
    requires => {
       'perl' => '5.008', # fails on 5.6 smokers; no idea why
       'Carp' => '1.25', # new message format with trailing period
+      'Time::HiRes' => 0,
+   },
+   meta_merge => {
+      # It's unlikely at the time of writing that any CPAN client actually
+      # pays attention to this field, but it's nice to declare it on CPAN
+      # anyway so people will know I want to use it; maybe one day clients
+      # will follow it...
+      x_breaks => { do {
+         map { $_ => "< $FIXED{$_}" } keys %FIXED
+      }},
    },
    auto_configure_requires => 0, # Don't add M::B to configure_requires
    license => 'perl',
