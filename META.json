@@ -25,6 +25,7 @@
       "runtime" : {
          "requires" : {
             "Carp" : "1.25",
+            "Test::Builder::Module" : "0",
             "Time::HiRes" : "0",
             "perl" : "5.008"
          }
@@ -33,11 +34,15 @@
    "provides" : {
       "Future" : {
          "file" : "lib/Future.pm",
-         "version" : "0.28"
+         "version" : "0.29"
       },
       "Future::Utils" : {
          "file" : "lib/Future/Utils.pm",
-         "version" : "0.28"
+         "version" : "0.29"
+      },
+      "Test::Future" : {
+         "file" : "lib/Test/Future.pm",
+         "version" : "0.29"
       }
    },
    "release_status" : "stable",
@@ -46,7 +51,7 @@
          "http://dev.perl.org/licenses/"
       ]
    },
-   "version" : "0.28",
+   "version" : "0.29",
    "x_breaks" : {
       "IO::Async" : "< 0.62",
       "IO::Async::SSL" : "< 0.14",

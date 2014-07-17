@@ -56,6 +56,20 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    is( scalar $future->failure, "Nothing to do\n", '$future returns otherwise failure for empty list' );
 }
 
+# foreach on empty list
+{
+   my $future = repeat { die "Not invoked" } foreach => [];
+
+   ok( $future->is_ready, 'repeat {} on empty foreach without otherwise already ready' );
+   is_deeply( [ $future->get ], [], 'Result of empty future' );
+
+   $future = repeat { die "Not invoked" } foreach => [],
+      otherwise => sub { Future->done( 1, 2, 3 ) };
+
+   ok( $future->is_ready, 'repeat {} on empty foreach with otherwise already ready' );
+   is_deeply( [ $future->get ], [ 1, 2, 3 ], 'Result of otherwise future' );
+}
+
 # foreach while
 {
    my $future = try_repeat {

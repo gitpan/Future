@@ -172,7 +172,7 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    } while => sub { $_[0]->failure };
 
    ok( $future->is_ready, '$future is now ready after repeat retries failures' );
-   like( $warnings, qr/^Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead at \Q$0\E line \d+\.?$/,
+   like( $warnings, qr/(?:^Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead at \Q$0\E line \d+\.?$)+/m,
       'Warnings printing by repeat retries failures' );
 }
 

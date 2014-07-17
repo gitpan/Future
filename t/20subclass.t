@@ -30,14 +30,6 @@ use Test::Identity;
            "t::Future::Subclass",
            '$f->followed_by' );
 
-   isa_ok( $f->and_then( sub {} ),
-           "t::Future::Subclass",
-           '$f->and_then' );
-
-   isa_ok( $f->or_else( sub {} ),
-           "t::Future::Subclass",
-           '$f->or_else' );
-
    isa_ok( $f->transform(),
            "t::Future::Subclass",
            '$f->transform' );

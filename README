@@ -36,6 +36,13 @@ DESCRIPTION
     are documented in two sections; those of interest to each side of the
     interface.
 
+    It should be noted however, that this module does not in any way provide
+    an actual mechanism for performing this asynchronous activity; it merely
+    provides a way to create objects that can be used for control and data
+    flow around those operations. It allows such code to be written in a
+    neater, forward-reading manner, and simplifies many common patterns that
+    are often involved in such situations.
+
     See also Future::Utils which contains useful loop-constructing
     functions, to run a future-returning function repeatedly in a loop.
 
@@ -504,8 +511,9 @@ SEQUENCING METHODS
 
      $f2 = $code->( $f1 )
 
-    This method may be removed in a later version; use `then_with_f' in new
-    code.
+    This method will be removed in a later version; use `then_with_f' in new
+    code. As a reminder, this method will now cause a one-time warning when
+    it is first invoked.
 
   $future = $f1->or_else( \&code )
     An older form of `else_with_f'; this method passes only the original
@@ -514,8 +522,9 @@ SEQUENCING METHODS
 
      $f2 = $code->( $f1 )
 
-    This method may be removed in a later version; use `else_with_f' in new
-    code.
+    This method will be removed in a later version; use `else_with_f' in new
+    code. As a reminder, this method will now cause a one-time warning when
+    it is first invoked.
 
 DEPENDENT FUTURES
     The following constructors all take a list of component futures, and
@@ -527,8 +536,8 @@ DEPENDENT FUTURES
   $future = Future->wait_all( @subfutures )
     Returns a new `Future' instance that will indicate it is ready once all
     of the sub future objects given to it indicate that they are ready,
-    either by success or failure. Its result will a list of its component
-    futures.
+    either by success, failure or cancellation. Its result will a list of
+    its component futures.
 
     When given an empty list this constructor returns a new immediately-done
     future.
@@ -541,7 +550,9 @@ DEPENDENT FUTURES
     of the sub future objects given to it indicate that they are ready,
     either by success or failure. Any remaining component futures that are
     not yet ready will be cancelled. Its result will be the result of the
-    first component future that was ready; either success or failure.
+    first component future that was ready; either success or failure. Any
+    component futures that are cancelled are ignored, apart from the final
+    component left; at which point the result will be a failure.
 
     When given an empty list this constructor returns an immediately-failed
     future.
@@ -554,7 +565,8 @@ DEPENDENT FUTURES
     of the sub future objects given to it indicate that they have completed
     successfully, or when any of them indicates that they have failed. If
     any sub future fails, then this will fail immediately, and the remaining
-    subs not yet ready will be cancelled.
+    subs not yet ready will be cancelled. Any component futures that are
+    cancelled will cause an immediate failure of the result.
 
     If successful, its result will be a concatenated list of the results of
     all its component futures, in corresponding order. If it fails, its
@@ -572,7 +584,9 @@ DEPENDENT FUTURES
     of the sub future objects given to it indicate that they have completed
     successfully, or when all of them indicate that they have failed. If any
     sub future succeeds, then this will succeed immediately, and the
-    remaining subs not yet ready will be cancelled.
+    remaining subs not yet ready will be cancelled. Any component futures
+    that are cancelled are ignored, apart from the final component left; at
+    which point the result will be a failure.
 
     If successful, its result will be that of the first component future
     that succeeded. If it fails, its failure will be that of the last
@@ -788,6 +802,69 @@ EXAMPLES
     This provides an ability somewhat similar to `CPS::kpar()' or
     Async::MergePoint.
 
+KNONW ISSUES
+  Cancellation of Non-Final Sequence Futures
+    The behaviour of future cancellation still has some unanswered questions
+    regarding how to handle the situation where a future is cancelled that
+    has a sequence future constructed from it.
+
+    In particular, it is unclear in each of the following examples what the
+    behaviour of `$f2' should be, were `$f1' to be cancelled:
+
+     $f2 = $f1->then( sub { ... } ); # plus related ->then_with_f, ->and_then, ...
+
+     $f2 = $f1->else( sub { ... } ); # plus related ->else_with_f, ->or_else, ...
+
+     $f2 = $f1->followed_by( sub { ... } );
+
+    In the `then'-style case it is likely that this situation should be
+    treated as if `$f1' had failed, perhaps with some special message. The
+    `else'-style case is more complex, because it may be that the entire
+    operation should still fail, or it may be that the cancellation of `$f1'
+    should again be treated simply as a special kind of failure, and the
+    `else' logic run as normal.
+
+    To be specific; in each case it is unclear what happens if the first
+    future is cancelled, while the second one is still waiting on it. The
+    semantics for "normal" top-down cancellation of `$f2' and how it affects
+    `$f1' are already clear and defined.
+
+  Cancellation of Divergent Flow
+    A further complication of cancellation comes from the case where a given
+    future is reused multiple times for multiple sequences or dependent
+    trees.
+
+    In particular, it is in clear in each of the following examples what the
+    behaviour of `$f2' should be, were `$f1' to be cancelled:
+
+     my $f_initial = Future->new; ...
+     my $f1 = $f_initial->then( ... );
+     my $f2 = $f_initial->then( ... );
+
+     my $f1 = Future->needs_all( $f_initial );
+     my $f2 = Future->needs_all( $f_initial );
+
+    The point of cancellation propagation is to trace backwards through
+    stages of some larger sequence of operations that now no longer need to
+    happen, because the final result is no longer required. But in each of
+    these cases, just because `$f1' has been cancelled, the initial future
+    `$f_initial' is still required because there is another future (`$f2')
+    that will still require its result.
+
+    Initially it would appear that some kind of reference-counting mechanism
+    could solve this question, though that itself is further complicated by
+    the `on_ready' handler and its variants.
+
+    It may simply be that a comprehensive useful set of cancellation
+    semantics can't be universally provided to cover all cases; and that
+    some use-cases at least would require the application logic to give
+    extra information to its `Future' objects on how they should wire up the
+    cancel propagation logic.
+
+    Both of these cancellation issues are still under active design
+    consideration; see the discussion on RT96685 for more information
+    (https://rt.cpan.org/Ticket/Display.html?id=96685).
+
 SEE ALSO
     *   curry - Create automatic curried method call closures for any class
         or object
@@ -802,6 +879,16 @@ SEE ALSO
 
         http://leonerds-code.blogspot.co.uk/2013/12/futures-advent-day-1.htm
         l
+
+TODO
+    *   Consider renaming "dependent" futures to "convergent" - that seems
+        to better fit what they do for control/data flow.
+
+    *   Consider the ability to pass the constructor an `await' CODEref,
+        instead of needing to use a subclass. This might simplify
+        async/etc.. implementations, and allows the reuse of the idea of
+        subclassing to extend the abilities of `Future' itself - for example
+        to allow a kind of Future that can report incremental progress.
 
 AUTHOR
     Paul Evans <leonerd@leonerd.org.uk>

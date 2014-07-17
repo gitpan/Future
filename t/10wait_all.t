@@ -129,6 +129,26 @@ use Future;
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
 
+# cancelled dependents
+{
+   my $f1 = Future->new;
+   my $f2 = Future->new;
+
+   my $future = Future->wait_all( $f1, $f2 );
+
+   $f1->done( "result" );
+   $f2->cancel;
+
+   ok( $future->is_ready, '$future of cancelled sub is ready after final cancellation' );
+
+   is_deeply( [ $future->done_futures ],
+              [ $f1 ],
+              '->done_futures with cancellation' );
+   is_deeply( [ $future->cancelled_futures ],
+              [ $f2 ],
+              '->cancelled_futures with cancellation' );
+}
+
 # wait_all on none
 {
    my $f = Future->wait_all( () );

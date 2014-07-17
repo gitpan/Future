@@ -122,6 +122,20 @@ use Future;
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
 
+# cancelled dependents
+{
+   my $f1 = Future->new;
+   my $f2 = Future->new;
+
+   my $future = Future->needs_all( $f1, $f2 );
+
+   $f1->cancel;
+
+   ok( $future->is_ready, '$future of cancelled sub is ready after first cancellation' );
+
+   like( scalar $future->failure, qr/ cancelled/, 'Failure mentions cancelled' );
+}
+
 # needs_all on none
 {
    my $f = Future->needs_all( () );

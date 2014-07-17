@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.28';
+our $VERSION = '0.29';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed reftype );
@@ -64,6 +64,13 @@ calling programs to control or wait for these operations to complete. The
 implementation and the user of such an interface would typically make use of
 different methods on the class. The methods below are documented in two
 sections; those of interest to each side of the interface.
+
+It should be noted however, that this module does not in any way provide an
+actual mechanism for performing this asynchronous activity; it merely provides
+a way to create objects that can be used for control and data flow around
+those operations. It allows such code to be written in a neater,
+forward-reading manner, and simplifies many common patterns that are often
+involved in such situations.
 
 See also L<Future::Utils> which contains useful loop-constructing functions,
 to run a future-returning function repeatedly in a loop.
@@ -1260,14 +1267,21 @@ future to obtain the result.
 
  $f2 = $code->( $f1 )
 
-This method may be removed in a later version; use C<then_with_f> in new code.
+This method will be removed in a later version; use C<then_with_f> in new
+code. As a reminder, this method will now cause a one-time warning when it is
+first invoked.
 
 =cut
+
+my $and_then_warned;
 
 sub and_then
 {
    my $self = shift;
    my ( $code ) = @_;
+
+   $and_then_warned or
+      $and_then_warned++, Carp::carp "Future->and_then is now deprecated; use ->then_with_f instead";
 
    return $self->_sequence( $code, CB_SEQ_ONDONE|CB_SELF );
 }
@@ -1280,14 +1294,21 @@ C<failure> on the future to obtain the result.
 
  $f2 = $code->( $f1 )
 
-This method may be removed in a later version; use C<else_with_f> in new code.
+This method will be removed in a later version; use C<else_with_f> in new
+code. As a reminder, this method will now cause a one-time warning when it is
+first invoked.
 
 =cut
+
+my $or_else_warned;
 
 sub or_else
 {
    my $self = shift;
    my ( $code ) = @_;
+
+   $or_else_warned or
+      $or_else_warned++, Carp::carp "Future->or_else is now deprecated; use ->else_with_f instead";
 
    return $self->_sequence( $code, CB_SEQ_ONFAIL|CB_SELF );
 }
@@ -1335,7 +1356,8 @@ sub _new_dependent
 
 Returns a new C<Future> instance that will indicate it is ready once all of
 the sub future objects given to it indicate that they are ready, either by
-success or failure. Its result will a list of its component futures.
+success, failure or cancellation. Its result will a list of its component
+futures.
 
 When given an empty list this constructor returns a new immediately-done
 future.
@@ -1369,7 +1391,6 @@ sub wait_all
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->{cancelled};
       return unless $weakself;
 
       $pending--;
@@ -1392,7 +1413,9 @@ Returns a new C<Future> instance that will indicate it is ready once any of
 the sub future objects given to it indicate that they are ready, either by
 success or failure. Any remaining component futures that are not yet ready
 will be cancelled. Its result will be the result of the first component future
-that was ready; either success or failure.
+that was ready; either success or failure. Any component futures that are
+cancelled are ignored, apart from the final component left; at which point the
+result will be a failure.
 
 When given an empty list this constructor returns an immediately-failed
 future.
@@ -1435,27 +1458,36 @@ sub wait_any
       return $self;
    }
 
+   my $pending = 0;
+
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->{cancelled};
       return unless $weakself;
+      return if $weakself->{result} or $weakself->{failure}; # don't recurse on child ->cancel
 
-      foreach my $sub ( @subs ) {
-         $sub->{ready} or $sub->cancel;
+      return if --$pending and $_[0]->{cancelled};
+
+      if( $_[0]->{cancelled} ) {
+         $weakself->{failure} = [ "All component futures were cancelled" ];
       }
-
-      if( $_[0]->{failure} ) {
+      elsif( $_[0]->{failure} ) {
          $weakself->{failure} = [ $_[0]->failure ];
       }
       else {
          $weakself->{result}  = [ $_[0]->get ];
       }
+
+      foreach my $sub ( @subs ) {
+         $sub->{ready} or $sub->cancel;
+      }
+
       $weakself->_mark_ready;
    };
 
    foreach my $sub ( @subs ) {
       # No need to test $sub->{ready} since we know none of them are
       $sub->on_ready( $sub_on_ready );
+      $pending++;
    }
 
    return $self;
@@ -1467,7 +1499,8 @@ Returns a new C<Future> instance that will indicate it is ready once all of the
 sub future objects given to it indicate that they have completed successfully,
 or when any of them indicates that they have failed. If any sub future fails,
 then this will fail immediately, and the remaining subs not yet ready will be
-cancelled.
+cancelled. Any component futures that are cancelled will cause an immediate
+failure of the result.
 
 If successful, its result will be a concatenated list of the results of all
 its component futures, in corresponding order. If it fails, its failure will
@@ -1522,14 +1555,21 @@ sub needs_all
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->{cancelled};
       return unless $weakself;
+      return if $weakself->{result} or $weakself->{failure}; # don't recurse on child ->cancel
 
-      if( my @failure = $_[0]->failure ) {
+      if( $_[0]->{cancelled} ) {
+         $weakself->{failure} = [ "All component futures were cancelled" ];
          foreach my $sub ( @subs ) {
             $sub->cancel if !$sub->{ready};
          }
+         $weakself->_mark_ready;
+      }
+      elsif( my @failure = $_[0]->failure ) {
          $weakself->{failure} = \@failure;
+         foreach my $sub ( @subs ) {
+            $sub->cancel if !$sub->{ready};
+         }
          $weakself->_mark_ready;
       }
       else {
@@ -1554,7 +1594,9 @@ Returns a new C<Future> instance that will indicate it is ready once any of
 the sub future objects given to it indicate that they have completed
 successfully, or when all of them indicate that they have failed. If any sub
 future succeeds, then this will succeed immediately, and the remaining subs
-not yet ready will be cancelled.
+not yet ready will be cancelled. Any component futures that are cancelled are
+ignored, apart from the final component left; at which point the result will
+be a failure.
 
 If successful, its result will be that of the first component future that
 succeeded. If it fails, its failure will be that of the last component future
@@ -1618,22 +1660,26 @@ sub needs_any
 
    weaken( my $weakself = $self );
    my $sub_on_ready = sub {
-      return if $_[0]->{cancelled};
       return unless $weakself;
+      return if $weakself->{result} or $weakself->{failure}; # don't recurse on child ->cancel
 
-      $pending--;
+      return if --$pending and $_[0]->{cancelled};
 
-      if( my @failure = $_[0]->failure ) {
+      if( $_[0]->{cancelled} ) {
+         $weakself->{failure} = [ "All component futures were cancelled" ];
+         $weakself->_mark_ready;
+      }
+      elsif( my @failure = $_[0]->failure ) {
          $pending and return;
 
          $weakself->{failure} = \@failure;
          $weakself->_mark_ready;
       }
       else {
+         $weakself->{result} = [ $_[0]->get ];
          foreach my $sub ( @subs ) {
             $sub->cancel if !$sub->{ready};
          }
-         $weakself->{result} = [ $_[0]->get ];
          $weakself->_mark_ready;
       }
    };
@@ -1943,6 +1989,71 @@ L<Async::MergePoint>.
 
 =cut
 
+=head1 KNONW ISSUES
+
+=head2 Cancellation of Non-Final Sequence Futures
+
+The behaviour of future cancellation still has some unanswered questions
+regarding how to handle the situation where a future is cancelled that has a
+sequence future constructed from it.
+
+In particular, it is unclear in each of the following examples what the
+behaviour of C<$f2> should be, were C<$f1> to be cancelled:
+
+ $f2 = $f1->then( sub { ... } ); # plus related ->then_with_f, ->and_then, ...
+
+ $f2 = $f1->else( sub { ... } ); # plus related ->else_with_f, ->or_else, ...
+
+ $f2 = $f1->followed_by( sub { ... } );
+
+In the C<then>-style case it is likely that this situation should be treated
+as if C<$f1> had failed, perhaps with some special message. The C<else>-style
+case is more complex, because it may be that the entire operation should still
+fail, or it may be that the cancellation of C<$f1> should again be treated
+simply as a special kind of failure, and the C<else> logic run as normal.
+
+To be specific; in each case it is unclear what happens if the first future is
+cancelled, while the second one is still waiting on it. The semantics for
+"normal" top-down cancellation of C<$f2> and how it affects C<$f1> are already
+clear and defined.
+
+=head2 Cancellation of Divergent Flow
+
+A further complication of cancellation comes from the case where a given
+future is reused multiple times for multiple sequences or dependent trees.
+
+In particular, it is in clear in each of the following examples what the
+behaviour of C<$f2> should be, were C<$f1> to be cancelled:
+
+ my $f_initial = Future->new; ...
+ my $f1 = $f_initial->then( ... );
+ my $f2 = $f_initial->then( ... );
+
+ my $f1 = Future->needs_all( $f_initial );
+ my $f2 = Future->needs_all( $f_initial );
+
+The point of cancellation propagation is to trace backwards through stages of
+some larger sequence of operations that now no longer need to happen, because
+the final result is no longer required. But in each of these cases, just
+because C<$f1> has been cancelled, the initial future C<$f_initial> is still
+required because there is another future (C<$f2>) that will still require its
+result.
+
+Initially it would appear that some kind of reference-counting mechanism could
+solve this question, though that itself is further complicated by the
+C<on_ready> handler and its variants.
+
+It may simply be that a comprehensive useful set of cancellation semantics
+can't be universally provided to cover all cases; and that some use-cases at
+least would require the application logic to give extra information to its
+C<Future> objects on how they should wire up the cancel propagation logic.
+
+Both of these cancellation issues are still under active design consideration;
+see the discussion on RT96685 for more information
+(L<https://rt.cpan.org/Ticket/Display.html?id=96685>).
+
+=cut
+
 =head1 SEE ALSO
 
 =over 4
@@ -1964,6 +2075,27 @@ L<https://docs.google.com/presentation/d/1UkV5oLcTOOXBXPh8foyxko4PR28_zU_aVx6gBm
 "Futures advent calendar 2013"
 
 L<http://leonerds-code.blogspot.co.uk/2013/12/futures-advent-day-1.html>
+
+=back
+
+=cut
+
+=head1 TODO
+
+=over 4
+
+=item *
+
+Consider renaming "dependent" futures to "convergent" - that seems to better
+fit what they do for control/data flow.
+
+=item *
+
+Consider the ability to pass the constructor an C<await> CODEref, instead of
+needing to use a subclass. This might simplify async/etc.. implementations,
+and allows the reuse of the idea of subclassing to extend the abilities of
+C<Future> itself - for example to allow a kind of Future that can report
+incremental progress.
 
 =back
 

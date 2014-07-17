@@ -10,6 +10,9 @@ use Test::Identity;
 use Future;
 
 {
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= join "", @_ };
+
    my $f1 = Future->new;
 
    my $f2;
@@ -26,6 +29,7 @@ use Future;
    $f2->done( results => "here" );
 
    is_deeply( [ $fseq->get ], [ results => "here" ], '$fseq->get returns results' );
+   ok( length $warnings, '->and_then causes a warning' );
 }
 
 # code dies

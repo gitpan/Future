@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.28';
+our $VERSION = '0.29';
 
 use Exporter 'import';
 # Can't import the one from Exporter as it relies on package inheritance
@@ -206,8 +206,8 @@ the trial future.
 Calls the C<CODE> block once for each value obtained from the array, passing
 in the value as the first argument (before the previous trial future). When
 there are no more items left in the array, the C<otherwise> code is invoked
-once and passed the last trial future, if there was one, otherwise C<undef> if
-the list was originally empty. The result of the eventual future will be the
+once and passed the last trial future, if there was one, or C<undef> if the
+list was originally empty. The result of the eventual future will be the
 result of the future returned from C<otherwise>.
 
 The referenced array may be modified by this operation.
@@ -216,7 +216,9 @@ The referenced array may be modified by this operation.
  $final_f = $otherwise->( $last_trial_f )
 
 The C<otherwise> code is optional; if not supplied then the result of the
-eventual future will simply be that of the last trial.
+eventual future will simply be that of the last trial. If there was no trial,
+because the C<foreach> list was already empty, then an immediate successful
+future with an empty result is returned.
 
 =head2 $future = repeat { CODE } foreach => ARRAY, while => CODE, ...
 
@@ -251,13 +253,12 @@ call. Subsequent values will be ignored. When it has no more items to return
 it should return an empty list.
 
 For backward compatibility this function will allow a C<while> or C<until>
-condition that requests a failure be repeated, but it will print a one-time
-warning if it has to do that. To apply repeating behaviour that can catch and
-retry failures, use C<try_repeat> instead.
+condition that requests a failure be repeated, but it will print a warning if
+it has to do that. To apply repeating behaviour that can catch and retry
+failures, use C<try_repeat> instead. This old behaviour is now deprecated and
+will be removed in the next version.
 
 =cut
-
-my $try_repeat_warned;
 
 sub _repeat
 {
@@ -288,8 +289,7 @@ sub _repeat
       }
 
       if( !$is_try and $trial->failure ) {
-         $try_repeat_warned or $try_repeat_warned++,
-            carp "Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead";
+         carp "Using Future::Utils::repeat to retry a failure is deprecated; use try_repeat instead";
       }
 
       # redo
@@ -339,7 +339,7 @@ sub repeat(&@)
             goto &$otherwise;
          }
          else {
-            return $last_trial_f;
+            return $last_trial_f || Future->done;
          }
       };
 

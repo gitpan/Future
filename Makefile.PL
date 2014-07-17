@@ -7,6 +7,7 @@ WriteMakefile
   'VERSION_FROM' => 'lib/Future.pm',
   'PREREQ_PM' => {
                    'Carp' => '1.25',
+                   'Test::Builder::Module' => 0,
                    'Test::Fatal' => 0,
                    'Test::Identity' => 0,
                    'Test::More' => '0.88',

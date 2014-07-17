@@ -11,6 +11,9 @@ use Future;
 
 # First failure
 {
+   my $warnings;
+   local $SIG{__WARN__} = sub { $warnings .= join "", @_ };
+
    my $f1 = Future->new;
 
    my $f2;
@@ -28,6 +31,7 @@ use Future;
 
    ok( $fseq->is_ready, '$fseq is done after $f2 done' );
    is_deeply( [ $fseq->get ], [ results => "here" ], '$fseq->get returns results' );
+   ok( length $warnings, '->or_else causes a warning' );
 }
 
 # code dies

@@ -1,5 +1,18 @@
 Revision history for Future
 
+0.29    2014/07/17 12:18:12
+        [CHANGES]
+         * Added Test::Future
+         * Stronger deprecations - repeat {} on failures warns every time,
+           ->and_then / ->or_else warn once
+
+        [BUGFIXES]
+         * Define the behaviour of dependent futures when components are
+           cancelled. (Partially fixes RT96685)
+         * Use Module::Build->prompt (RT96409)
+         * Ensure that repeat on an empty foreach list or empty generator
+           without 'otherwise' behaves correctly, just yield an immediate
+
 0.28    2014/06/08 22:43:40
         [CHANGES]
          * Added ->label

@@ -108,6 +108,38 @@ use Future;
    is( $c1, 1, '$future->cancel marks subs cancelled' );
 }
 
+# cancelled dependents
+{
+   my $f1 = Future->new;
+   my $f2 = Future->new;
+
+   my $future = Future->wait_any( $f1, $f2 );
+
+   $f1->cancel;
+
+   ok( !$future->is_ready, '$future not yet ready after first cancellation' );
+
+   $f2->done( "result" );
+
+   ok( $future->is_ready, '$future is ready' );
+
+   is_deeply( [ $future->done_futures ],
+              [ $f2 ],
+              '->done_futures with cancellation' );
+   is_deeply( [ $future->cancelled_futures ],
+              [ $f1 ],
+              '->cancelled_futures with cancellation' );
+
+   my $f3 = Future->new;
+   $future = Future->wait_any( $f3 );
+
+   $f3->cancel;
+
+   ok( $future->is_ready, '$future is ready after final cancellation' );
+
+   like( scalar $future->failure, qr/ cancelled/, 'Failure mentions cancelled' );
+}
+
 # wait_any on none
 {
    my $f = Future->wait_any( () );

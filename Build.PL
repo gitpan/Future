@@ -38,10 +38,11 @@ print STDERR "\n" if $printed;
 
 if( $printed and -t STDIN ) {
    # Attended update; might as well ask the user to confirm and exit if not
-   print STDERR "Are you still sure you wish to go ahead with this upgrade?\n";
-   print STDERR "[enter 'yes' to continue]: ";
-
-   my $reply = <STDIN>;
+   my $reply = Module::Build->prompt(
+      "Are you still sure you wish to go ahead with this upgrade?\n" .
+         "[enter 'yes' to continue]: ",
+      "no"
+   );
 
    die "Aborting install due to broken dependent modules\n" unless $reply =~ m/^y/i;
 }
@@ -57,6 +58,7 @@ my $build = Module::Build->new(
    requires => {
       'perl' => '5.008', # fails on 5.6 smokers; no idea why
       'Carp' => '1.25', # new message format with trailing period
+      'Test::Builder::Module' => 0,
       'Time::HiRes' => 0,
    },
    meta_merge => {
