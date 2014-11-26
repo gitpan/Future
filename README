@@ -23,10 +23,11 @@ DESCRIPTION
     ready by calling the `done' or `fail' methods. These are called "leaf"
     futures here, and are returned by the `new' constructor.
 
-    Other futures represent a collection sub-tasks, and are implicitly
+    Other futures represent a collection of sub-tasks, and are implicitly
     marked as ready depending on the readiness of their component futures as
-    required. These are called "dependent" futures here, and are returned by
-    the various `wait_*' and `need_*' constructors.
+    required. These are called "convergent" futures here as they converge
+    control and data-flow back into one place. These are the ones returned
+    by the various `wait_*' and `need_*' constructors.
 
     It is intended that library functions that perform asynchronous
     operations would use future objects to represent outstanding operations,
@@ -173,7 +174,7 @@ IMPLEMENTATION METHODS
   $future->done( @result )
     Marks that the leaf future is now ready, and provides a list of values
     as a result. (The empty list is allowed, and still indicates the future
-    as ready). Cannot be called on a dependent future.
+    as ready). Cannot be called on a convergent future.
 
     If the future is already cancelled, this request is ignored. If the
     future is already complete with a result or a failure, an exception is
@@ -260,7 +261,7 @@ USER METHODS
     `done' method, failed using the `fail' method, or cancelled using the
     `cancel' method.
 
-    Returns true on a dependent future if it is ready to yield a result,
+    Returns true on a convergent future if it is ready to yield a result,
     depending on its component futures.
 
   $future->on_ready( $code )
@@ -289,7 +290,7 @@ USER METHODS
     If the future is ready and completed successfully, returns the list of
     results that had earlier been given to the `done' method on a leaf
     future, or the list of component futures it was waiting for on a
-    dependent future. In scalar context it returns just the first result
+    convergent future. In scalar context it returns just the first result
     value.
 
     If the future is ready but failed, this method raises as an exception
@@ -378,7 +379,7 @@ USER METHODS
   $future->cancel
     Requests that the future be cancelled, immediately marking it as ready.
     This will invoke all of the code blocks registered by `on_cancel', in
-    the reverse order. When called on a dependent future, all its component
+    the reverse order. When called on a convergent future, all its component
     futures are also cancelled. It is not an error to attempt to cancel a
     future that is already complete or cancelled; it simply has no effect.
 
@@ -512,8 +513,8 @@ SEQUENCING METHODS
      $f2 = $code->( $f1 )
 
     This method will be removed in a later version; use `then_with_f' in new
-    code. As a reminder, this method will now cause a one-time warning when
-    it is first invoked.
+    code. As a reminder, this method will now cause a warning every time it
+    is invoked.
 
   $future = $f1->or_else( \&code )
     An older form of `else_with_f'; this method passes only the original
@@ -523,10 +524,17 @@ SEQUENCING METHODS
      $f2 = $code->( $f1 )
 
     This method will be removed in a later version; use `else_with_f' in new
-    code. As a reminder, this method will now cause a one-time warning when
-    it is first invoked.
+    code. As a reminder, this method will now cause a warning every time it
+    is invoked.
 
-DEPENDENT FUTURES
+  $future = $f1->without_cancel
+    Returns a new sequencing `Future' that will complete with the success or
+    failure of the original future, but if cancelled, will not cancel the
+    original. This may be useful if the original future represents an
+    operation that is being shared among multiple sequences; cancelling one
+    should not prevent the others from running too.
+
+CONVERGENT FUTURES
     The following constructors all take a list of component futures, and
     return a new future whose readiness somehow depends on the readiness of
     those components. The first derived class component future will be used
@@ -605,8 +613,8 @@ DEPENDENT FUTURES
     This constructor would primarily be used by users of asynchronous
     interfaces.
 
-METHODS ON DEPENDENT FUTURES
-    The following methods apply to dependent (i.e. non-leaf) futures, to
+METHODS ON CONVERGENT FUTURES
+    The following methods apply to convergent (i.e. non-leaf) futures, to
     access the component futures stored by it.
 
   @f = $future->pending_futures
@@ -802,7 +810,7 @@ EXAMPLES
     This provides an ability somewhat similar to `CPS::kpar()' or
     Async::MergePoint.
 
-KNONW ISSUES
+KNOWN ISSUES
   Cancellation of Non-Final Sequence Futures
     The behaviour of future cancellation still has some unanswered questions
     regarding how to handle the situation where a future is cancelled that
@@ -831,7 +839,7 @@ KNONW ISSUES
 
   Cancellation of Divergent Flow
     A further complication of cancellation comes from the case where a given
-    future is reused multiple times for multiple sequences or dependent
+    future is reused multiple times for multiple sequences or convergent
     trees.
 
     In particular, it is in clear in each of the following examples what the
@@ -881,9 +889,6 @@ SEE ALSO
         l
 
 TODO
-    *   Consider renaming "dependent" futures to "convergent" - that seems
-        to better fit what they do for control/data flow.
-
     *   Consider the ability to pass the constructor an `await' CODEref,
         instead of needing to use a subclass. This might simplify
         async/etc.. implementations, and allows the reuse of the idea of

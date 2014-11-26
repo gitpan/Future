@@ -34,6 +34,8 @@ use Future;
    ok( length $warnings, '->or_else causes a warning' );
 }
 
+$SIG{__WARN__} = sub {};
+
 # code dies
 {
    my $f1 = Future->new;
@@ -72,32 +74,6 @@ use Future;
 
    is( $called, 0, 'or_else block not invoked for already-done' );
    ok( $fseq->is_ready, '$fseq already ready for already-done' );
-}
-
-# Void context raises a warning
-{
-   my $warnings;
-   local $SIG{__WARN__} = sub { $warnings .= $_[0]; };
-
-   Future->done->or_else(
-      sub { Future->new }
-   );
-   like( $warnings,
-         qr/^Calling ->or_else in void context at /,
-         'Warning in void context' );
-}
-
-# Non-Future return raises exception
-{
-   my $f1 = Future->new;
-
-   my $file = __FILE__;
-   my $line = __LINE__+1;
-   my $fseq = $f1->or_else( sub {} );
-
-   like( exception { $f1->fail(1) },
-       qr/^Expected __ANON__\(\Q$file\E line $line\) to return a Future/,
-       'Exception from non-Future return' );
 }
 
 done_testing;

@@ -9,72 +9,81 @@ use Test::Identity;
 # subclass->...
 {
    my $f = t::Future::Subclass->new;
+   my @seq;
 
-   isa_ok( $f->then( sub {} ),
+   isa_ok( $seq[@seq] = $f->then( sub {} ),
            "t::Future::Subclass",
            '$f->then' );
 
-   isa_ok( $f->else( sub {} ),
+   isa_ok( $seq[@seq] = $f->else( sub {} ),
            "t::Future::Subclass",
            '$f->and_then' );
 
-   isa_ok( $f->then_with_f( sub {} ),
+   isa_ok( $seq[@seq] = $f->then_with_f( sub {} ),
            "t::Future::Subclass",
            '$f->then_with_f' );
 
-   isa_ok( $f->else_with_f( sub {} ),
+   isa_ok( $seq[@seq] = $f->else_with_f( sub {} ),
            "t::Future::Subclass",
            '$f->else_with_f' );
 
-   isa_ok( $f->followed_by( sub {} ),
+   isa_ok( $seq[@seq] = $f->followed_by( sub {} ),
            "t::Future::Subclass",
            '$f->followed_by' );
 
-   isa_ok( $f->transform(),
+   isa_ok( $seq[@seq] = $f->transform(),
            "t::Future::Subclass",
            '$f->transform' );
+
+   $_->cancel for @seq;
 }
 
 # immediate->followed_by( sub { subclass } )
 {
    my $f = t::Future::Subclass->new;
+   my $seq;
 
-   isa_ok( Future->done->followed_by( sub { $f } ),
+   isa_ok( $seq = Future->done->followed_by( sub { $f } ),
            "t::Future::Subclass",
            'imm->followed_by $f' );
+
+   $seq->cancel;
 }
 
-# dependents
+# convergents
 {
    my $f = t::Future::Subclass->new;
+   my @seq;
 
-   isa_ok( Future->wait_all( $f ),
+   isa_ok( $seq[@seq] = Future->wait_all( $f ),
            "t::Future::Subclass",
            'Future->wait_all( $f )' );
 
-   isa_ok( Future->wait_any( $f ),
+   isa_ok( $seq[@seq] = Future->wait_any( $f ),
            "t::Future::Subclass",
            'Future->wait_any( $f )' );
 
-   isa_ok( Future->needs_all( $f ),
+   isa_ok( $seq[@seq] = Future->needs_all( $f ),
            "t::Future::Subclass",
            'Future->needs_all( $f )' );
 
-   isa_ok( Future->needs_any( $f ),
+   isa_ok( $seq[@seq] = Future->needs_any( $f ),
            "t::Future::Subclass",
            'Future->needs_any( $f )' );
 
    my $imm = Future->done;
 
-   isa_ok( Future->wait_all( $imm, $f ),
+   isa_ok( $seq[@seq] = Future->wait_all( $imm, $f ),
            "t::Future::Subclass",
            'Future->wait_all( $imm, $f )' );
 
    # Pick the more derived subclass even if all are pending
 
-   isa_ok( Future->wait_all( Future->new, $f ),
+   isa_ok( $seq[@seq] = Future->wait_all( Future->new, $f ),
            "t::Future::Subclass",
            'Future->wait_all( Future->new, $f' );
+
+   $_->cancel for @seq;
 }
 
 my $f_await;

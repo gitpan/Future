@@ -174,10 +174,24 @@ use Future;
    my $file = __FILE__;
    my $line = __LINE__+1;
    my $fseq = $f1->followed_by( sub {} );
+   my $fseq2 = $f1->followed_by( sub { Future->done } );
 
-   like( exception { $f1->done },
+   ok( !exception { $f1->done },
+       '->done with non-Future return from ->followed_by does not die' );
+
+   like( $fseq->failure,
        qr/^Expected __ANON__\(\Q$file\E line $line\) to return a Future/,
-       'Exception from non-Future return' );
+       'Failure from non-Future return from ->followed_by' );
+
+   ok( $fseq2->is_ready, '$fseq2 is ready after failure of $fseq' );
+
+   my $fseq3;
+   ok( !exception { $fseq3 = $f1->followed_by( sub {} ) },
+      'non-Future return from ->followed_by on immediate does not die' );
+
+   like( $fseq3->failure,
+       qr/^Expected __ANON__\(.*\) to return a Future/,
+       'Failure from non-Future return from ->followed_by on immediate' );
 }
 
 done_testing;

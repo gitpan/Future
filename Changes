@@ -1,5 +1,23 @@
 Revision history for Future
 
+0.30    2014/11/26 14:29:28
+        [CHANGES]
+         * Rename 'dependent' futures to 'convergent'
+         * Removed examples/ scripts that now exist as independent modules
+         * Added ->without_cancel
+         * Sanity-check the $code argument to ->on_{ready,done,fail,cancel} to
+           ensure it is callable or a Future
+        
+        [BUGFIXES]
+         * Ensure that 'ready_at' is always set in DEBUG mode
+         * Fix DEBUG 'lost_at' line number reporting tests for latest
+           bleadperl (RT99002)
+         * Ensure that if Future::Utils::repeat condition code dies, that is
+           passed to the result Future and not propagated to the caller
+           (RT100067)
+         * Failure by returning a non-Future from a sequencing code block
+           should report as a failed Future, not throw exception to caller
+
 0.29    2014/07/17 12:18:12
         [CHANGES]
          * Added Test::Future

@@ -108,7 +108,7 @@ use Future;
    is( $c1, 1, '$future->cancel marks subs cancelled' );
 }
 
-# cancelled dependents
+# cancelled convergent
 {
    my $f1 = Future->new;
    my $f2 = Future->new;

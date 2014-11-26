@@ -75,6 +75,11 @@ my $build = Module::Build->new(
    create_makefile_pl => 'traditional',
    create_license => 1,
    create_readme  => 1,
+   meta_merge => {
+      resources => {
+         x_IRC => "irc://irc.perl.org/#io-async",
+      },
+   },
 );
 
 $build->create_build_script;

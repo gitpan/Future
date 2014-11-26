@@ -8,7 +8,7 @@ package Future::Utils;
 use strict;
 use warnings;
 
-our $VERSION = '0.29';
+our $VERSION = '0.30';
 
 use Exporter 'import';
 # Can't import the one from Exporter as it relies on package inheritance
@@ -280,7 +280,14 @@ sub _repeat
          return $return;
       }
 
-      if( !$cond->( $trial ) ^ $sense ) {
+      my $stop;
+      if( not eval { $stop = !$cond->( $trial ) ^ $sense; 1 } ) {
+         $return ||= $trial->new;
+         $return->fail( $@ );
+         return $return;
+      }
+
+      if( $stop ) {
          # Return result
          $return ||= $trial->new;
          $trial->on_done( $return );

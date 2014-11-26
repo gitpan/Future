@@ -430,7 +430,7 @@ instead.
  my $f = Future->needs_all( FIRST_A(), FIRST_B() )
     ->then( sub { SECOND( @_ ) } );
 
-The C<get> method of a C<needs_all> dependent Future returns a concatenated
+The C<get> method of a C<needs_all> convergent Future returns a concatenated
 list of the results of all its component Futures, as the only way it will
 succeed is if all the components do.
 

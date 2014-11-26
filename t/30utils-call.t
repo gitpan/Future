@@ -17,6 +17,7 @@ use Future::Utils qw( call );
    };
 
    identical( $f, $ret_f, 'call() returns future returned from its code' );
+   $f->cancel;
 }
 
 # call returns immediate failure on die

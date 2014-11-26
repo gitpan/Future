@@ -165,10 +165,24 @@ use Future;
    my $file = __FILE__;
    my $line = __LINE__+1;
    my $fseq = $f1->else( sub {} );
+   my $fseq2 = $f1->else( sub { Future->done } );
 
-   like( exception { $f1->fail( "failed\n" ) },
+   ok( !exception { $f1->fail( "failed\n" ) },
+       '->fail with non-Future return from ->else does not die' );
+
+   like( $fseq->failure,
        qr/^Expected __ANON__\(\Q$file\E line $line\) to return a Future/,
-       'Exception from non-Future return' );
+       'Failure from non-Future return from ->else' );
+
+   ok( $fseq2->is_ready, '$fseq2 is ready after failure of $fseq' );
+
+   my $fseq3;
+   ok( !exception { $fseq3 = $f1->else( sub {} ) },
+      'non-Future return from ->else on immediate does not die' );
+
+   like( $fseq3->failure,
+       qr/^Expected __ANON__\(.*\) to return a Future/,
+       'Failure from non-Future return from ->else on immediate' );
 }
 
 # else_with_f

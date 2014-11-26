@@ -9,7 +9,7 @@ use strict;
 use warnings;
 no warnings 'recursion'; # Disable the "deep recursion" warning
 
-our $VERSION = '0.29';
+our $VERSION = '0.30';
 
 use Carp qw(); # don't import croak
 use Scalar::Util qw( weaken blessed reftype );
@@ -53,10 +53,11 @@ Some futures represent a single operation and are explicitly marked as ready
 by calling the C<done> or C<fail> methods. These are called "leaf" futures
 here, and are returned by the C<new> constructor.
 
-Other futures represent a collection sub-tasks, and are implicitly marked as
-ready depending on the readiness of their component futures as required. These
-are called "dependent" futures here, and are returned by the various C<wait_*>
-and C<need_*> constructors.
+Other futures represent a collection of sub-tasks, and are implicitly marked
+as ready depending on the readiness of their component futures as required.
+These are called "convergent" futures here as they converge control and
+data-flow back into one place. These are the ones returned by the various
+C<wait_*> and C<need_*> constructors.
 
 It is intended that library functions that perform asynchronous operations
 would use future objects to represent outstanding operations, and allow their
@@ -220,7 +221,7 @@ sub CvNAME_FILE_LINE
 sub _callable
 {
    my ( $cb ) = @_;
-   reftype($cb) eq 'CODE' or overload::Method($cb, '&{}')
+   defined $cb and ( reftype($cb) eq 'CODE' || overload::Method($cb, '&{}') );
 }
 
 sub new
@@ -315,10 +316,18 @@ sub call
    return $f;
 }
 
+sub _shortmess
+{
+   my $at = Carp::shortmess( $_[0] );
+   chomp $at; $at =~ s/\.$//;
+   return $at;
+}
+
 sub _mark_ready
 {
    my $self = shift;
    $self->{ready} = 1;
+   $self->{ready_at} = _shortmess $_[0] if DEBUG;
 
    if( $TIMES ) {
       $self->{rtime} = [ gettimeofday ];
@@ -383,7 +392,8 @@ sub _mark_ready
             }
 
             unless( blessed $f2 and $f2->isa( "Future" ) ) {
-               die "Expected " . CvNAME_FILE_LINE($code) . " to return a Future\n";
+               $fseq->fail( "Expected " . CvNAME_FILE_LINE($code) . " to return a Future" );
+               next;
             }
 
             $fseq->on_cancel( $f2 );
@@ -430,7 +440,7 @@ interfaces.
 
 Marks that the leaf future is now ready, and provides a list of values as a
 result. (The empty list is allowed, and still indicates the future as ready).
-Cannot be called on a dependent future.
+Cannot be called on a convergent future.
 
 If the future is already cancelled, this request is ignored. If the future is
 already complete with a result or a failure, an exception is thrown.
@@ -455,18 +465,13 @@ sub done
       $self->{ready} and Carp::croak "${\$self->__selfstr} is already ".$self->_state." and cannot be ->done";
       $self->{subs} and Carp::croak "${\$self->__selfstr} is not a leaf Future, cannot be ->done";
       $self->{result} = [ @_ ];
-      $self->_mark_ready;
+      $self->_mark_ready( "done" );
    }
    else {
       $self = $self->new;
       $self->{ready} = 1;
+      $self->{ready_at} = _shortmess "done" if DEBUG;
       $self->{result} = [ @_ ];
-   }
-
-   if( DEBUG ) {
-      my $at = Carp::shortmess( "done" );
-      chomp $at; $at =~ s/\.$//;
-      $self->{ready_at} = $at;
    }
 
    return $self;
@@ -526,11 +531,12 @@ sub fail
       $self->{ready} and Carp::croak "${\$self->__selfstr} is already ".$self->_state." and cannot be ->fail'ed";
       $self->{subs} and Carp::croak "${\$self->__selfstr} is not a leaf Future, cannot be ->fail'ed";
       $self->{failure} = [ $exception, @details ];
-      $self->_mark_ready;
+      $self->_mark_ready( "fail" );
    }
    else {
       $self = $self->new;
       $self->{ready} = 1;
+      $self->{ready_at} = _shortmess "fail" if DEBUG;
       $self->{failure} = [ $exception, @details ];
    }
 
@@ -604,9 +610,15 @@ is already complete.
 sub on_cancel
 {
    my $self = shift;
+   my ( $code ) = @_;
+
+   my $is_future = blessed( $code ) && $code->isa( "Future" );
+   $is_future or _callable( $code ) or
+      Carp::croak "Expected \$code to be callable or a Future in ->on_cancel";
+
    $self->{ready} and return $self;
 
-   push @{ $self->{on_cancel} }, @_;
+   push @{ $self->{on_cancel} }, $code;
 
    return $self;
 }
@@ -636,8 +648,8 @@ Returns true on a leaf future if a result has been provided to the C<done>
 method, failed using the C<fail> method, or cancelled using the C<cancel>
 method.
 
-Returns true on a dependent future if it is ready to yield a result, depending
-on its component futures.
+Returns true on a convergent future if it is ready to yield a result,
+depending on its component futures.
 
 =cut
 
@@ -672,9 +684,11 @@ sub on_ready
    my $self = shift;
    my ( $code ) = @_;
 
-   if( $self->{ready} ) {
-      my $is_future = blessed( $code ) && $code->isa( "Future" );
+   my $is_future = blessed( $code ) && $code->isa( "Future" );
+   $is_future or _callable( $code ) or
+      Carp::croak "Expected \$code to be callable or a Future in ->on_ready";
 
+   if( $self->{ready} ) {
       my $fail = defined $self->{failure};
       my $done = !$fail && !$self->{cancelled};
 
@@ -709,7 +723,7 @@ sub is_done
 
 If the future is ready and completed successfully, returns the list of
 results that had earlier been given to the C<done> method on a leaf future,
-or the list of component futures it was waiting for on a dependent future. In
+or the list of component futures it was waiting for on a convergent future. In
 scalar context it returns just the first result value.
 
 If the future is ready but failed, this method raises as an exception the
@@ -796,10 +810,13 @@ sub on_done
    my $self = shift;
    my ( $code ) = @_;
 
+   my $is_future = blessed( $code ) && $code->isa( "Future" );
+   $is_future or _callable( $code ) or
+      Carp::croak "Expected \$code to be callable or a Future in ->on_done";
+
    if( $self->{ready} ) {
       return $self if $self->{failure} or $self->{cancelled};
 
-      my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->done( $self->get ) 
                  : $code->( $self->get );
    }
@@ -887,10 +904,13 @@ sub on_fail
    my $self = shift;
    my ( $code ) = @_;
 
+   my $is_future = blessed( $code ) && $code->isa( "Future" );
+   $is_future or _callable( $code ) or
+      Carp::croak "Expected \$code to be callable or a Future in ->on_fail";
+
    if( $self->{ready} ) {
       return $self if not $self->{failure};
 
-      my $is_future = blessed( $code ) && $code->isa( "Future" );
       $is_future ? $code->fail( $self->failure )
                  : $code->( $self->failure );
    }
@@ -905,7 +925,7 @@ sub on_fail
 
 Requests that the future be cancelled, immediately marking it as ready. This
 will invoke all of the code blocks registered by C<on_cancel>, in the reverse
-order. When called on a dependent future, all its component futures are also
+order. When called on a convergent future, all its component futures are also
 cancelled. It is not an error to attempt to cancel a future that is already
 complete or cancelled; it simply has no effect.
 
@@ -925,13 +945,7 @@ sub cancel
       $is_future ? $code->cancel
                  : $code->( $self );
    }
-   $self->_mark_ready;
-
-   if( DEBUG ) {
-      my $at = Carp::shortmess( "cancelled" );
-      chomp $at; $at =~ s/\.$//;
-      $self->{ready_at} = $at;
-   }
+   $self->_mark_ready( "cancel" );
 
    return $self;
 }
@@ -1017,7 +1031,7 @@ sub _sequence
       }
 
       unless( blessed $fseq and $fseq->isa( "Future" ) ) {
-         die "Expected " . CvNAME_FILE_LINE($code) . " to return a Future\n";
+         return Future->fail( "Expected " . CvNAME_FILE_LINE($code) . " to return a Future" );
       }
 
       return $fseq;
@@ -1140,11 +1154,13 @@ sub transform
       my $self = shift;
       if( !$self->{failure} ) {
          return $self unless $xfrm_done;
-         return $self->new->done( $xfrm_done->( $self->get ) );
+         my @result = $xfrm_done->( $self->get );
+         return $self->new->done( @result );
       }
       else {
          return $self unless $xfrm_fail;
-         return $self->new->fail( $xfrm_fail->( $self->failure ) );
+         my @failure = $xfrm_fail->( $self->failure );
+         return $self->new->fail( @failure );
       }
    }, CB_SEQ_ONDONE|CB_SEQ_ONFAIL|CB_SELF );
 }
@@ -1268,20 +1284,17 @@ future to obtain the result.
  $f2 = $code->( $f1 )
 
 This method will be removed in a later version; use C<then_with_f> in new
-code. As a reminder, this method will now cause a one-time warning when it is
-first invoked.
+code. As a reminder, this method will now cause a warning every time it is
+invoked.
 
 =cut
-
-my $and_then_warned;
 
 sub and_then
 {
    my $self = shift;
    my ( $code ) = @_;
 
-   $and_then_warned or
-      $and_then_warned++, Carp::carp "Future->and_then is now deprecated; use ->then_with_f instead";
+   Carp::carp "Future->and_then is now deprecated; use ->then_with_f instead";
 
    return $self->_sequence( $code, CB_SEQ_ONDONE|CB_SELF );
 }
@@ -1295,25 +1308,50 @@ C<failure> on the future to obtain the result.
  $f2 = $code->( $f1 )
 
 This method will be removed in a later version; use C<else_with_f> in new
-code. As a reminder, this method will now cause a one-time warning when it is
-first invoked.
+code. As a reminder, this method will now cause a warning every time it is
+invoked.
 
 =cut
-
-my $or_else_warned;
 
 sub or_else
 {
    my $self = shift;
    my ( $code ) = @_;
 
-   $or_else_warned or
-      $or_else_warned++, Carp::carp "Future->or_else is now deprecated; use ->else_with_f instead";
+   Carp::carp "Future->or_else is now deprecated; use ->else_with_f instead";
 
    return $self->_sequence( $code, CB_SEQ_ONFAIL|CB_SELF );
 }
 
-=head1 DEPENDENT FUTURES
+=head2 $future = $f1->without_cancel
+
+Returns a new sequencing C<Future> that will complete with the success or
+failure of the original future, but if cancelled, will not cancel the
+original. This may be useful if the original future represents an operation
+that is being shared among multiple sequences; cancelling one should not
+prevent the others from running too.
+
+=cut
+
+sub without_cancel
+{
+   my $self = shift;
+   my $new = $self->new;
+
+   $self->on_ready( sub {
+      my $self = shift;
+      if( $self->failure ) {
+         $new->fail( $self->failure );
+      }
+      else {
+         $new->done( $self->get );
+      }
+   });
+
+   return $new;
+}
+
+=head1 CONVERGENT FUTURES
 
 The following constructors all take a list of component futures, and return a
 new future whose readiness somehow depends on the readiness of those
@@ -1323,7 +1361,7 @@ correctly, or failing that a plain C<Future>.
 
 =cut
 
-sub _new_dependent
+sub _new_convergent
 {
    shift; # ignore this class
    my ( $subs ) = @_;
@@ -1377,7 +1415,7 @@ sub wait_all
       return $self;
    }
 
-   my $self = Future->_new_dependent( \@subs );
+   my $self = Future->_new_convergent( \@subs );
 
    my $pending = 0;
    $_->{ready} or $pending++ for @subs;
@@ -1385,7 +1423,7 @@ sub wait_all
    # Look for immediate ready
    if( !$pending ) {
       $self->{result} = [ @subs ];
-      $self->_mark_ready;
+      $self->_mark_ready( "wait_all" );
       return $self;
    }
 
@@ -1397,7 +1435,7 @@ sub wait_all
       $pending and return;
 
       $weakself->{result} = [ @subs ];
-      $weakself->_mark_ready;
+      $weakself->_mark_ready( "wait_all" );
    };
 
    foreach my $sub ( @subs ) {
@@ -1435,7 +1473,7 @@ sub wait_any
       return $self;
    }
 
-   my $self = Future->_new_dependent( \@subs );
+   my $self = Future->_new_convergent( \@subs );
 
    # Look for immediate ready
    my $immediate_ready;
@@ -1454,7 +1492,7 @@ sub wait_any
       else {
          $self->{result} = [ $immediate_ready->get ];
       }
-      $self->_mark_ready;
+      $self->_mark_ready( "wait_any" );
       return $self;
    }
 
@@ -1481,7 +1519,7 @@ sub wait_any
          $sub->{ready} or $sub->cancel;
       }
 
-      $weakself->_mark_ready;
+      $weakself->_mark_ready( "wait_any" );
    };
 
    foreach my $sub ( @subs ) {
@@ -1525,7 +1563,7 @@ sub needs_all
       return $self;
    }
 
-   my $self = Future->_new_dependent( \@subs );
+   my $self = Future->_new_convergent( \@subs );
 
    # Look for immediate fail
    my $immediate_fail;
@@ -1539,7 +1577,7 @@ sub needs_all
       }
 
       $self->{failure} = [ $immediate_fail->failure ];
-      $self->_mark_ready;
+      $self->_mark_ready( "needs_all" );
       return $self;
    }
 
@@ -1549,7 +1587,7 @@ sub needs_all
    # Look for immediate done
    if( !$pending ) {
       $self->{result} = [ map { $_->get } @subs ];
-      $self->_mark_ready;
+      $self->_mark_ready( "needs_all" );
       return $self;
    }
 
@@ -1559,25 +1597,25 @@ sub needs_all
       return if $weakself->{result} or $weakself->{failure}; # don't recurse on child ->cancel
 
       if( $_[0]->{cancelled} ) {
-         $weakself->{failure} = [ "All component futures were cancelled" ];
+         $weakself->{failure} = [ "A component future was cancelled" ];
          foreach my $sub ( @subs ) {
             $sub->cancel if !$sub->{ready};
          }
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_all" );
       }
       elsif( my @failure = $_[0]->failure ) {
          $weakself->{failure} = \@failure;
          foreach my $sub ( @subs ) {
             $sub->cancel if !$sub->{ready};
          }
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_all" );
       }
       else {
          $pending--;
          $pending and return;
 
          $weakself->{result} = [ map { $_->get } @subs ];
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_all" );
       }
    };
 
@@ -1625,7 +1663,7 @@ sub needs_any
       return $self;
    }
 
-   my $self = Future->_new_dependent( \@subs );
+   my $self = Future->_new_convergent( \@subs );
 
    # Look for immediate done
    my $immediate_done;
@@ -1641,7 +1679,7 @@ sub needs_any
       }
 
       $self->{result} = [ $immediate_done->get ];
-      $self->_mark_ready;
+      $self->_mark_ready( "needs_any" );
       return $self;
    }
 
@@ -1654,7 +1692,7 @@ sub needs_any
    if( $immediate_fail ) {
       # For consistency we'll pick the last one for the failure
       $self->{failure} = [ $subs[-1]->{failure} ];
-      $self->_mark_ready;
+      $self->_mark_ready( "needs_any" );
       return $self;
    }
 
@@ -1667,20 +1705,20 @@ sub needs_any
 
       if( $_[0]->{cancelled} ) {
          $weakself->{failure} = [ "All component futures were cancelled" ];
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_any" );
       }
       elsif( my @failure = $_[0]->failure ) {
          $pending and return;
 
          $weakself->{failure} = \@failure;
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_any" );
       }
       else {
          $weakself->{result} = [ $_[0]->get ];
          foreach my $sub ( @subs ) {
             $sub->cancel if !$sub->{ready};
          }
-         $weakself->_mark_ready;
+         $weakself->_mark_ready( "needs_any" );
       }
    };
 
@@ -1691,9 +1729,9 @@ sub needs_any
    return $self;
 }
 
-=head1 METHODS ON DEPENDENT FUTURES
+=head1 METHODS ON CONVERGENT FUTURES
 
-The following methods apply to dependent (i.e. non-leaf) futures, to access
+The following methods apply to convergent (i.e. non-leaf) futures, to access
 the component futures stored by it.
 
 =cut
@@ -1717,35 +1755,35 @@ component futures.
 sub pending_futures
 {
    my $self = shift;
-   $self->{subs} or Carp::croak "Cannot call ->pending_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->pending_futures on a non-convergent Future";
    return grep { not $_->{ready} } @{ $self->{subs} };
 }
 
 sub ready_futures
 {
    my $self = shift;
-   $self->{subs} or Carp::croak "Cannot call ->ready_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->ready_futures on a non-convergent Future";
    return grep { $_->{ready} } @{ $self->{subs} };
 }
 
 sub done_futures
 {
    my $self = shift;
-   $self->{subs} or Carp::croak "Cannot call ->done_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->done_futures on a non-convergent Future";
    return grep { $_->{ready} and not $_->{failure} and not $_->{cancelled} } @{ $self->{subs} };
 }
 
 sub failed_futures
 {
    my $self = shift;
-   $self->{subs} or Carp::croak "Cannot call ->failed_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->failed_futures on a non-convergent Future";
    return grep { $_->{ready} and $_->{failure} } @{ $self->{subs} };
 }
 
 sub cancelled_futures
 {
    my $self = shift;
-   $self->{subs} or Carp::croak "Cannot call ->cancelled_futures on a non-dependent Future";
+   $self->{subs} or Carp::croak "Cannot call ->cancelled_futures on a non-convergent Future";
    return grep { $_->{ready} and $_->{cancelled} } @{ $self->{subs} };
 }
 
@@ -1989,7 +2027,7 @@ L<Async::MergePoint>.
 
 =cut
 
-=head1 KNONW ISSUES
+=head1 KNOWN ISSUES
 
 =head2 Cancellation of Non-Final Sequence Futures
 
@@ -2020,7 +2058,7 @@ clear and defined.
 =head2 Cancellation of Divergent Flow
 
 A further complication of cancellation comes from the case where a given
-future is reused multiple times for multiple sequences or dependent trees.
+future is reused multiple times for multiple sequences or convergent trees.
 
 In particular, it is in clear in each of the following examples what the
 behaviour of C<$f2> should be, were C<$f1> to be cancelled:
@@ -2083,11 +2121,6 @@ L<http://leonerds-code.blogspot.co.uk/2013/12/futures-advent-day-1.html>
 =head1 TODO
 
 =over 4
-
-=item *
-
-Consider renaming "dependent" futures to "convergent" - that seems to better
-fit what they do for control/data flow.
 
 =item *
 

@@ -96,7 +96,7 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    is( scalar $future->get, "four", '$future->get' );
 }
 
-# code dies
+# body code dies
 {
    my $future;
 
@@ -111,6 +111,15 @@ use Future::Utils qw( repeat try_repeat try_repeat_until_success );
    } until => sub { shift->failure };
 
    is( $future->failure, "It failed\n", 'repeat until failure after code exception' );
+}
+
+# condition code dies (RT100067)
+{
+   my $future = repeat {
+      Future->done(1);
+   } while => sub { die "it dies!\n" };
+
+   is( $future->failure, "it dies!\n", 'repeat while failure after condition exception' );
 }
 
 # Non-Future return fails

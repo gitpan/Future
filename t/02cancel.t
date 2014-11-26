@@ -44,6 +44,9 @@ use Future;
    like( exception { $future->get }, qr/cancelled/, '$future->get throws exception by cancel' );
 
    ok( !exception { $future->cancel }, '$future->cancel a second time is OK' );
+
+   $done_f->cancel;
+   $fail_f->cancel;
 }
 
 # cancel_cb
@@ -83,6 +86,9 @@ use Future;
    ok( $ready_f->is_cancelled, 'on_ready chained future cnacelled for already-cancelled future' );
    ok( !$done_f->is_ready, 'on_done chained future not ready for already-cancelled future' );
    ok( !$fail_f->is_ready, 'on_fail chained future not ready for already-cancelled future' );
+
+   $done_f->cancel;
+   $fail_f->cancel;
 }
 
 # cancel chaining
@@ -105,6 +111,21 @@ use Future;
 
    ok( eval { $f->done( "ignored" ); 1 }, '->done on cancelled future is ignored' );
    ok( eval { $f->fail( "ignored" ); 1 }, '->fail on cancelled future is ignored' );
+}
+
+# without_cancel
+{
+   my $f1 = Future->new;
+   my $f2 = $f1->without_cancel;
+
+   $f2->cancel;
+   ok( !$f1->is_cancelled, '$f1 not cancelled just because $f2 is' );
+
+   my $f3 = $f1->without_cancel;
+   $f1->done( "result" );
+
+   ok( $f3->is_ready, '$f3 ready when $f1 is' );
+   is_deeply( [ $f3->get ], [ "result" ], 'result of $f3' );
 }
 
 done_testing;

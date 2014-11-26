@@ -129,7 +129,7 @@ use Future;
    is( $c2, undef, '$future->cancel ignores ready subs' );
 }
 
-# cancelled dependents
+# cancelled convergent
 {
    my $f1 = Future->new;
    my $f2 = Future->new;
